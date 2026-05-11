@@ -5,6 +5,7 @@ export interface UserLoginAuditItem {
 	id: number;
 	userId?: number;
 	loginName?: string;
+	userNickname?: string;
 	starNumber?: string;
 	loginType?: number;
 	loginTypeDesc?: string;
@@ -43,6 +44,7 @@ export interface UserSessionItem {
 export interface UserShareRiskItem {
 	userId?: number;
 	loginName?: string;
+	userNickname?: string;
 	starNumber?: string;
 	kickoutCount?: number;
 	loginSuccessCount?: number;

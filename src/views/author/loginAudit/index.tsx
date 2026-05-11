@@ -204,11 +204,12 @@ const LoginAuditPage: FC = () => {
 			title: "星球编号",
 			dataIndex: "starNumber",
 			key: "starNumber",
-			width: 120,
+			width: 140,
 			render: (_, item) => (
 				<div>
 					<div className="login-audit__multiline">{item.starNumber || "-"}</div>
-					<div className="login-audit__subtext">登录名: {item.loginName || "-"}</div>
+					<div className="login-audit__subtext">用户名: {item.loginName || "-"}</div>
+					<div className="login-audit__subtext">昵称: {item.userNickname || "-"}</div>
 				</div>
 			)
 		},
@@ -281,11 +282,12 @@ const LoginAuditPage: FC = () => {
 			title: "星球编号",
 			dataIndex: "starNumber",
 			key: "starNumber",
-			width: 140,
+			width: 150,
 			render: (_, item) => (
 				<div>
 					<div className="login-audit__multiline">{item.starNumber || "-"}</div>
-					<div className="login-audit__subtext">登录名: {item.loginName || "-"}</div>
+					<div className="login-audit__subtext">用户名: {item.loginName || "-"}</div>
+					<div className="login-audit__subtext">昵称: {item.userNickname || "-"}</div>
 				</div>
 			)
 		},
