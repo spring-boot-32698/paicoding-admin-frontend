@@ -69,7 +69,7 @@ export interface LoginAuditQuery {
 }
 
 export interface UserShareRiskQuery {
-	loginName?: string;
+	starNumber?: string;
 	recentDays?: number;
 	minKickoutCount?: number;
 	minDeviceCount?: number;

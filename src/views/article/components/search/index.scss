@@ -9,7 +9,10 @@
   &__search {
     flex: 1;
     display: flex;
-    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 12px 16px;
+    justify-content: flex-start;
+    align-items: center;
 
     &-wrap {
       display: flex;
@@ -17,7 +20,11 @@
   }
 
   &__search-item {
-    margin-right: 28px;
+    margin-right: 0;
+
+    &--keyword {
+      order: -1;
+    }
   }
 
   &-label {

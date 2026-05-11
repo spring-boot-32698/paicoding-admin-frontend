@@ -24,6 +24,14 @@ const Search: FC<IProps> = ({ handleSearchChange, handleSearch, PushStatusList, 
 			{/* 搜索 */}
 			<ContentInterWrap className="article-search__wrap">
 				<div className="article-search__search">
+					<div className="article-search__search-item article-search__search-item--keyword">
+						<Input
+							allowClear
+							placeholder="搜索标题/摘要/正文"
+							style={{ width: 220 }}
+							onChange={e => handleSearchChange({ keyword: e.target.value })}
+						/>
+					</div>
 					<div className="article-search__search-item">
 						{/* 增加一个作者的查询条件 */}
 						<Input

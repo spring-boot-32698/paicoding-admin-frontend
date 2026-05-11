@@ -224,13 +224,13 @@ const Comment: FC = () => {
 			title: "评论ID",
 			dataIndex: "commentId",
 			key: "commentId",
-			width: 96
+			width: 72
 		},
 		{
 			title: "文章",
 			dataIndex: "articleTitle",
 			key: "articleTitle",
-			width: 260,
+			width: 270,
 			render: (_, item) => {
 				const commentUrl = `${baseDomain}/article/detail/${item.articleId}#comment-${item.commentId}`;
 				return (
@@ -247,19 +247,22 @@ const Comment: FC = () => {
 			title: "类型",
 			dataIndex: "commentType",
 			key: "commentType",
-			width: 96,
+			width: 92,
 			render: value => (value === 1 ? <Tag color="blue">顶级评论</Tag> : <Tag color="gold">回复</Tag>)
 		},
 		{
 			title: "内容",
 			dataIndex: "commentContent",
 			key: "commentContent",
+			width: 430,
 			render: (_, item) => (
 				<Tooltip title={item.commentContent}>
-					<div>
+					<div className="comment-content-cell">
 						<div className="cell-content">{item.commentContent}</div>
 						{item.parentCommentId > 0 ? <div className="cell-meta">回复 #{item.parentCommentId}</div> : null}
-						{item.parentCommentContent ? <div className="cell-meta">引用：{item.parentCommentContent}</div> : null}
+						{item.parentCommentContent ? (
+							<div className="cell-meta cell-meta--ellipsis">引用：{item.parentCommentContent}</div>
+						) : null}
 					</div>
 				</Tooltip>
 			)
@@ -268,7 +271,7 @@ const Comment: FC = () => {
 			title: "作者",
 			dataIndex: "userName",
 			key: "userName",
-			width: 180,
+			width: 160,
 			render: (_, item) => (
 				<div className="cell-user">
 					<Avatar src={item.userAvatar}>{item.userName?.slice(0, 2) || "匿"}</Avatar>
@@ -280,21 +283,10 @@ const Comment: FC = () => {
 			)
 		},
 		{
-			title: "统计",
-			key: "stat",
-			width: 120,
-			render: (_, item) => (
-				<div>
-					<div>回复：{item.replyCount || 0}</div>
-					<div className="cell-meta">点赞：{item.praiseCount || 0}</div>
-				</div>
-			)
-		},
-		{
 			title: "时间",
 			dataIndex: "createTime",
 			key: "createTime",
-			width: 132,
+			width: 118,
 			render: (_, item) => {
 				const createTime = item.createTime ? dayjs(item.createTime) : null;
 				const updateTime = item.updateTime ? dayjs(item.updateTime) : null;
@@ -309,7 +301,7 @@ const Comment: FC = () => {
 		{
 			title: "操作",
 			key: "action",
-			width: 180,
+			width: 144,
 			render: (_, item) => (
 				<div className="operation-btn">
 					<Tooltip title="回复">
@@ -331,7 +323,14 @@ const Comment: FC = () => {
 			<ContentWrap>
 				<Search handleSearchChange={handleSearchChange} handleSearch={handleSearch} handleCreate={openCreateModal} />
 				<ContentInterWrap className="comment-page__table">
-					<Table columns={columns} dataSource={tableData} pagination={paginationInfo} rowKey="commentId" />
+					<Table
+						columns={columns}
+						dataSource={tableData}
+						pagination={paginationInfo}
+						rowKey="commentId"
+						scroll={{ x: 1286 }}
+						tableLayout="fixed"
+					/>
 				</ContentInterWrap>
 			</ContentWrap>
 			<Modal title={modalTitle} visible={isModalOpen} confirmLoading={submitting} onCancel={closeModal} onOk={handleSubmit}>

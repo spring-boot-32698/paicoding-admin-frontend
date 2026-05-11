@@ -13,3 +13,62 @@
 .sort {
   height: 100%;
 }
+
+.search-hit {
+  margin-top: 6px;
+  color: #666;
+  font-size: 12px;
+  line-height: 18px;
+  max-width: 540px;
+}
+
+.search-hit__field {
+  margin-right: 4px;
+  color: #999;
+}
+
+.search-hit__fragment {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  word-break: break-word;
+}
+
+.search-hit__mark {
+  padding: 0 2px;
+  color: #d4380d;
+  background: #fff1b8;
+  border-radius: 2px;
+}
+
+.search-hit__more {
+  height: 18px;
+  margin-top: 2px;
+  padding: 0;
+  font-size: 12px;
+}
+
+.search-hit-popover {
+  max-width: 560px;
+  max-height: 360px;
+  overflow-y: auto;
+}
+
+.search-hit-popover__item + .search-hit-popover__item {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid #f0f0f0;
+}
+
+.search-hit-popover__field {
+  margin-bottom: 4px;
+  color: #999;
+  font-size: 12px;
+}
+
+.search-hit-popover__fragment {
+  color: #333;
+  line-height: 20px;
+  word-break: break-word;
+}

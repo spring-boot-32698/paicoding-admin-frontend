@@ -26,7 +26,7 @@ interface LoginAuditFilterForm {
 }
 
 interface ShareRiskFilterForm {
-	loginName?: string;
+	starNumber?: string;
 	recentDays?: number;
 	minKickoutCount?: number;
 	minDeviceCount?: number;
@@ -41,7 +41,7 @@ const defaultLoginAuditFilter: LoginAuditFilterForm = {
 };
 
 const defaultShareRiskFilter: ShareRiskFilterForm = {
-	loginName: "",
+	starNumber: "",
 	recentDays: 7,
 	minKickoutCount: 2,
 	minDeviceCount: 2,
@@ -341,9 +341,10 @@ const LoginAuditPage: FC = () => {
 			render: (_, item) => (item.forbidden ? <Tag color="error">已禁用</Tag> : <Tag color="success">正常</Tag>)
 		},
 		{
-			title: "判断依据",
+			title: "依据",
 			dataIndex: "riskReason",
 			key: "riskReason",
+			width: 120,
 			render: value => <div className="login-audit__multiline">{value || "-"}</div>
 		},
 		{
@@ -408,7 +409,7 @@ const LoginAuditPage: FC = () => {
 		auditFormRef.setFieldsValue(auditValues);
 		setAuditPagination(prev => ({ ...prev, current: 1 }));
 		setAuditFilters(auditValues);
-		message.success(`已切换到 ${starNumber || "当前账号"} 的登录审计明细`);
+		message.success(`已切换到 ${starNumber || "当前账号"} 的登录轨迹明细`);
 		requestAnimationFrame(() => {
 			auditSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
 		});

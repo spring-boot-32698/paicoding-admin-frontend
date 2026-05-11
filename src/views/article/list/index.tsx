@@ -3,9 +3,10 @@ import { FC, useCallback, useEffect, useState } from "react";
 import { connect } from "react-redux";
 import { useNavigate } from "react-router";
 import { DeleteOutlined, EditOutlined, HighlightOutlined } from "@ant-design/icons";
-import { Avatar, Button, Form, Input, message, Modal, Select, Space, Switch, Table, Tooltip } from "antd";
+import { Avatar, Button, Form, Input, message, Modal, Popover, Select, Space, Switch, Table, Tooltip } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import dayjs from "dayjs";
+import Highlighter from "react-highlight-words";
 
 import { delArticleApi, generateArticleSlugApi, getArticleListApi, operateArticleApi, updateArticleApi } from "@/api/modules/article";
 import { getColumnListApi } from "@/api/modules/column";
@@ -16,6 +17,12 @@ import { baseDomain } from "@/utils/util";
 import Search from "../components/search";
 
 import "./index.scss";
+
+interface SearchSnippet {
+	field?: string;
+	fieldName?: string;
+	fragment?: string;
+}
 
 interface DataType {
 	articleId: number;
@@ -30,6 +37,8 @@ interface DataType {
 	creamStat: number;
 	urlSlug?: string;
 	shortTitle?: string;
+	searchHit?: string;
+	searchSnippets?: SearchSnippet[];
 }
 
 interface IProps {}
@@ -47,6 +56,7 @@ interface IInitForm {
 interface ISearchForm {
 	userName: string;
 	title: string;
+	keyword: string;
 	status: number;
 	toppingStat: number;
 	officalStat: number;
@@ -66,6 +76,7 @@ const defaultInitForm = {
 const defaultSearchForm = {
 	userName: "",
 	title: "",
+	keyword: "",
 	status: -1,
 	toppingStat : -1,
 	officalStat : -1,
@@ -382,6 +393,81 @@ const Article: FC<IProps> = props => {
 		}
 	};
 
+	const normalizeSnippetFragment = (fragment?: string) => {
+		return (fragment || "")
+			.replace(/<[^>]*>/g, "") // 去除所有 HTML 标签
+			.replace(/\*\*(.*?)\*\*/g, "$1") // 去除 Markdown 加粗
+			.replace(/\*(.*?)\*/g, "$1") // 去除 Markdown 斜体
+			.replace(/`(.*?)`/g, "$1") // 去除 Markdown 行内代码
+			.replace(/#{1,6}\s+/g, "") // 去除 Markdown 标题标记
+			.replace(/!?\[([^\]]*)\]\([^)]*\)/g, "$1") // 去除 Markdown 链接/图片
+			.replace(/\\"/g, "'") // 去除 JSON 转义的双引号
+			.replace(/\\'/g, "'") // 去除 JSON 转义的单引号
+			.replace(/\\/g, "") // 去除剩余反斜杠
+			.replace(/\s+/g, " ")
+			.trim();
+	};
+
+	const renderSnippetText = (fragment?: string) => {
+		const keyword = searchForm.keyword?.trim();
+		const snippet = normalizeSnippetFragment(fragment);
+		if (!keyword || !snippet) {
+			return snippet;
+		}
+		return (
+			<Highlighter
+				autoEscape
+				highlightClassName="search-hit__mark"
+				searchWords={[keyword]}
+				textToHighlight={snippet}
+			/>
+		);
+	};
+
+	const renderSearchSnippets = (item: DataType) => {
+		const snippets = item.searchSnippets?.length
+			? item.searchSnippets
+			: item.searchHit
+				? [{ fieldName: "命中", fragment: item.searchHit }]
+				: [];
+		if (!snippets.length) {
+			return null;
+		}
+
+		const firstSnippet = snippets[0];
+		const popoverContent = (
+			<div className="search-hit-popover">
+				{snippets.map((snippet, index) => (
+					<div className="search-hit-popover__item" key={`${snippet.field || "hit"}-${index}`}>
+						<div className="search-hit-popover__field">
+							{snippet.fieldName || "命中"} #{index + 1}
+						</div>
+						<div className="search-hit-popover__fragment">{renderSnippetText(snippet.fragment)}</div>
+					</div>
+				))}
+			</div>
+		);
+
+		return (
+			<div className="search-hit">
+				<span className="search-hit__field">命中{firstSnippet.fieldName || "片段"}：</span>
+				<span className="search-hit__fragment">{renderSnippetText(firstSnippet.fragment)}</span>
+				{snippets.length > 1 && (
+					<Popover
+						content={popoverContent}
+						overlayClassName="search-hit-popover-wrap"
+						title={`共 ${snippets.length} 处命中`}
+						trigger="click"
+					>
+						<Button className="search-hit__more" type="link" size="small">
+							查看更多命中
+						</Button>
+					</Popover>
+				)}
+			</div>
+		);
+	};
+
 	// 表头设置
 	const columns: ColumnsType<DataType> = [
 		{
@@ -400,26 +486,27 @@ const Article: FC<IProps> = props => {
 					</div>
 				);
 				return (
-					<Tooltip title={tooltipContent}>
-						<div>
+					<div>
+						<Tooltip title={tooltipContent}>
 							<a 
 								href={fullUrl}
 								className="cell-text"
 								target="_blank" rel="noreferrer">
 								{value}
 							</a>
-							{shortTitle && (
-								<div style={{ fontSize: '12px', color: '#1890ff', marginTop: '4px' }}>
-									教程: {shortTitle}
-								</div>
-							)}
-							{urlSlug && (
-								<div style={{ fontSize: '12px', color: '#999', marginTop: '4px' }}>
-									{urlSlug}
-								</div>
-							)}
-						</div>
-					</Tooltip>
+						</Tooltip>
+						{shortTitle && (
+							<div style={{ fontSize: '12px', color: '#1890ff', marginTop: '4px' }}>
+								教程: {shortTitle}
+							</div>
+						)}
+						{urlSlug && (
+							<div style={{ fontSize: '12px', color: '#999', marginTop: '4px' }}>
+								{urlSlug}
+							</div>
+						)}
+						{renderSearchSnippets(item)}
+					</div>
 				);
 			}
 		},
