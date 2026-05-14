@@ -1,17 +1,18 @@
 import { FC, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { SearchOutlined } from "@ant-design/icons";
-import { Alert, Button, Card, Col, Form, Input, InputNumber, Modal, Row, Select, Space, Table, Tag, message } from "antd";
+import { DeleteOutlined, SearchOutlined } from "@ant-design/icons";
+import { Alert, Button, Card, Col, Form, Input, InputNumber, message, Modal, Row, Select, Space, Table, Tag } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import dayjs from "dayjs";
 
 import {
+	clearLoginAuditApi,
 	forbidUserApi,
 	getLoginAuditListApi,
 	getUserShareRiskListApi,
 	LoginAuditQuery,
+	unforbidUserApi,
 	UserLoginAuditItem,
-	UserShareRiskItem,
-	unforbidUserApi
+	UserShareRiskItem
 } from "@/api/modules/user";
 import { ContentWrap } from "@/components/common-wrap";
 import { initPagination, IPagination } from "@/enums/common";
@@ -42,10 +43,10 @@ const defaultLoginAuditFilter: LoginAuditFilterForm = {
 
 const defaultShareRiskFilter: ShareRiskFilterForm = {
 	starNumber: "",
-	recentDays: 7,
-	minKickoutCount: 2,
-	minDeviceCount: 2,
-	minIpCount: 2
+	recentDays: undefined,
+	minKickoutCount: undefined,
+	minDeviceCount: undefined,
+	minIpCount: undefined
 };
 
 const loginAuditEventOptions = [
@@ -68,6 +69,8 @@ const reasonTextMap: Record<string, string> = {
 	FORCE_KICKOUT: "管理员或系统强制下线",
 	ACCOUNT_SUSPENDED: "账号已被禁用，系统强制下线"
 };
+
+const forbiddenOnlyRiskReason = "当前账号已禁用";
 
 const getRiskTagText = (riskTag?: string) => {
 	if (!riskTag) {
@@ -96,6 +99,7 @@ const LoginAuditPage: FC = () => {
 	const [shareRiskFormRef] = Form.useForm<ShareRiskFilterForm>();
 	const [auditLoading, setAuditLoading] = useState(false);
 	const [shareRiskLoading, setShareRiskLoading] = useState(false);
+	const [clearLoading, setClearLoading] = useState(false);
 	const [auditFilters, setAuditFilters] = useState<LoginAuditFilterForm>(defaultLoginAuditFilter);
 	const [shareRiskFilters, setShareRiskFilters] = useState<ShareRiskFilterForm>(defaultShareRiskFilter);
 	const [auditPagination, setAuditPagination] = useState<IPagination>(initPagination);
@@ -346,8 +350,17 @@ const LoginAuditPage: FC = () => {
 			title: "依据",
 			dataIndex: "riskReason",
 			key: "riskReason",
-			width: 120,
-			render: value => <div className="login-audit__multiline">{value || "-"}</div>
+			width: 140,
+			render: (_, item) => {
+				const riskReason = !item.forbidden && item.riskReason === forbiddenOnlyRiskReason ? "" : item.riskReason;
+				return (
+					<div>
+						<div className="login-audit__multiline">{riskReason || "-"}</div>
+						{item.lastHandleReason ? <div className="login-audit__subtext">最近处理: {item.lastHandleReason}</div> : null}
+						{item.lastReleaseAt ? <div className="login-audit__subtext">解禁于: {formatDateTime(item.lastReleaseAt)}</div> : null}
+					</div>
+				);
+			}
 		},
 		{
 			title: "操作",
@@ -387,13 +400,20 @@ const LoginAuditPage: FC = () => {
 	const handleShareRiskSearch = async () => {
 		const values = await shareRiskFormRef.validateFields();
 		setShareRiskPagination(prev => ({ ...prev, current: 1 }));
-		setShareRiskFilters({ ...defaultShareRiskFilter, ...values });
+		setShareRiskFilters(values);
 	};
 
 	const handleShareRiskReset = () => {
-		shareRiskFormRef.resetFields();
+		const emptyFilters = {
+			starNumber: "",
+			recentDays: undefined,
+			minKickoutCount: undefined,
+			minDeviceCount: undefined,
+			minIpCount: undefined
+		};
+		shareRiskFormRef.setFieldsValue(emptyFilters);
 		setShareRiskPagination(prev => ({ ...prev, current: 1 }));
-		setShareRiskFilters(defaultShareRiskFilter);
+		setShareRiskFilters(emptyFilters);
 	};
 
 	const handleInspectRisk = (item: UserShareRiskItem) => {
@@ -473,6 +493,32 @@ const LoginAuditPage: FC = () => {
 		});
 	};
 
+	const handleClearLoginAudit = () => {
+		Modal.confirm({
+			title: "确认清空全部登录审计数据？",
+			content:
+				"仅清空登录轨迹表（user_login_audit）。疑似共享账号与活跃会话不会一起清空，自动风控仍按既有规则运行。该操作不可恢复。",
+			okText: "确认清空",
+			okButtonProps: { danger: true },
+			cancelText: "取消",
+			onOk: async () => {
+				setClearLoading(true);
+				try {
+					const { status } = await clearLoginAuditApi();
+					if (status?.code !== 0) return;
+					message.success("登录审计数据已清空");
+					setAuditPagination(prev => ({ ...prev, current: 1 }));
+					setShareRiskPagination(prev => ({ ...prev, current: 1 }));
+					await Promise.all([fetchLoginAudit(), fetchShareRisk()]);
+				} catch (error) {
+					console.error(error);
+				} finally {
+					setClearLoading(false);
+				}
+			}
+		});
+	};
+
 	return (
 		<div className="login-audit">
 			<ContentWrap>
@@ -514,6 +560,8 @@ const LoginAuditPage: FC = () => {
 							<Col xs={24} md={4}>
 								<Form.Item label="统计周期" name="recentDays">
 									<Select
+										allowClear
+										placeholder="全部时间"
 										options={[
 											{ value: 3, label: "近3天" },
 											{ value: 7, label: "近7天" },
@@ -525,17 +573,17 @@ const LoginAuditPage: FC = () => {
 							</Col>
 							<Col xs={24} md={4}>
 								<Form.Item label="最少被踢次数" name="minKickoutCount">
-									<InputNumber min={1} max={99} style={{ width: "100%" }} />
+									<InputNumber min={1} max={99} placeholder="全部" style={{ width: "100%" }} />
 								</Form.Item>
 							</Col>
 							<Col xs={24} md={4}>
 								<Form.Item label="最少设备数" name="minDeviceCount">
-									<InputNumber min={1} max={99} style={{ width: "100%" }} />
+									<InputNumber min={1} max={99} placeholder="全部" style={{ width: "100%" }} />
 								</Form.Item>
 							</Col>
 							<Col xs={24} md={4}>
 								<Form.Item label="最少IP数" name="minIpCount">
-									<InputNumber min={1} max={99} style={{ width: "100%" }} />
+									<InputNumber min={1} max={99} placeholder="全部" style={{ width: "100%" }} />
 								</Form.Item>
 							</Col>
 						</Row>
@@ -559,7 +607,15 @@ const LoginAuditPage: FC = () => {
 				</Card>
 
 				<div ref={auditSectionRef}>
-					<Card className="login-audit__card" title="登录轨迹">
+					<Card
+						className="login-audit__card"
+						title="登录轨迹"
+						extra={
+							<Button danger icon={<DeleteOutlined />} loading={clearLoading} onClick={handleClearLoginAudit}>
+								清空审计数据
+							</Button>
+						}
+					>
 						<Form form={auditFormRef} layout="vertical" initialValues={defaultLoginAuditFilter} className="login-audit__filter">
 							<Row gutter={16}>
 								<Col xs={24} md={6}>

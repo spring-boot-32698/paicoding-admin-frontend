@@ -57,6 +57,8 @@ export interface UserShareRiskItem {
 	forbidden?: boolean;
 	forbidUntil?: string;
 	forbidReason?: string;
+	lastReleaseAt?: string;
+	lastHandleReason?: string;
 }
 
 export interface LoginAuditQuery {
@@ -110,6 +112,10 @@ export interface PageResult<T> {
 
 export const getLoginAuditListApi = (params: LoginAuditQuery) => {
 	return http.post<PageResult<UserLoginAuditItem>>(`${PORT1}/user/login-audit`, params);
+};
+
+export const clearLoginAuditApi = () => {
+	return http.post<string>(`${PORT1}/user/login-audit/clear`);
 };
 
 export const getUserSessionListApi = (params: UserSessionQuery) => {
