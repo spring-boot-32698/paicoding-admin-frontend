@@ -19,6 +19,23 @@ export const uploadImgApi = (data: FormData) => {
 	return http.post<Login.ResAuthButtons>(`${PORT1}/image/upload?t=${Date.now()}`, data);
 };
 
+export const createVodUploadAuthApi = (fileName: string, title?: string) => {
+	const data = new URLSearchParams();
+	data.append("fileName", fileName);
+	if (title) data.append("title", title);
+	return http.post<Login.ResAuthButtons>(`${PORT1}/video/upload/auth?t=${Date.now()}`, data, {
+		headers: { "Content-Type": "application/x-www-form-urlencoded" }
+	});
+};
+
+export const refreshVodUploadAuthApi = (videoId: string) => {
+	const data = new URLSearchParams();
+	data.append("videoId", videoId);
+	return http.post<Login.ResAuthButtons>(`${PORT1}/video/upload/refresh?t=${Date.now()}`, data, {
+		headers: { "Content-Type": "application/x-www-form-urlencoded" }
+	});
+};
+
 // 文件上传
 export const uploadFileUrl = () => {
 	return `${baseDomain}/oss/upload`;

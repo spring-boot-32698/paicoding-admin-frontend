@@ -1,6 +1,6 @@
 /* eslint-disable prettier/prettier */
 import { FC } from "react";
-import { ArrowLeftOutlined, FileTextOutlined, FileWordOutlined, RetweetOutlined, SaveOutlined } from "@ant-design/icons";
+import { ArrowLeftOutlined, FileTextOutlined, FileWordOutlined, RetweetOutlined, SaveOutlined, VideoCameraOutlined } from "@ant-design/icons";
 import { Button } from "antd";
 
 import { ContentInterWrap } from "@/components/common-wrap";
@@ -13,11 +13,12 @@ interface IProps {
 	handleReplaceImgUrl: (e: object) => void;
 	handleImportWord: () => void;
 	handleImportMarkdown: () => void;
+	handleUploadVideo: () => void;
 	goBack: () => void;
 	status: number;
 }
 
-const Search: FC<IProps> = ({ handleSave, goBack, status, handleReplaceImgUrl, handleImportWord, handleImportMarkdown }) => {
+const Search: FC<IProps> = ({ handleSave, goBack, status, handleReplaceImgUrl, handleImportWord, handleImportMarkdown, handleUploadVideo }) => {
 	return (
 		<div className="article-edit-search">
 			{/* 搜索 */}
@@ -39,6 +40,13 @@ const Search: FC<IProps> = ({ handleSave, goBack, status, handleReplaceImgUrl, h
 							style={{ marginRight: "10px" }} 
 							onClick={handleImportMarkdown}>
 							导入Markdown
+						</Button>
+
+						<Button type="default"
+							icon={<VideoCameraOutlined />}
+							style={{ marginRight: "10px" }}
+							onClick={handleUploadVideo}>
+							上传视频
 						</Button>
 
 						<Button type="primary" 

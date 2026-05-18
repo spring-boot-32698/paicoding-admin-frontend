@@ -17,12 +17,12 @@ import { throttle } from "lodash";
 import mammoth from "mammoth";
 
 import { generateArticleAiApi, getArticleApi, saveArticleApi, saveImgApi } from "@/api/modules/article";
-import { uploadImgApi } from "@/api/modules/common";
+import { createVodUploadAuthApi, refreshVodUploadAuthApi, uploadImgApi } from "@/api/modules/common";
 import { getTagListApi } from "@/api/modules/tag";
 import { ContentInterWrap, ContentWrap } from "@/components/common-wrap";
 import { PushStatusEnum, UpdateEnum } from "@/enums/common";
 import { MapItem } from "@/typings/common";
-import { getCompleteUrl, localGet, localRemove, localSet } from "@/utils/util";
+import { baseDomain, getCompleteUrl, localGet, localRemove, localSet } from "@/utils/util";
 import DebounceSelect from "@/views/article/components/debounceselect/index";
 import ImgUpload from "@/views/column/setting/components/imgupload";
 import Search from "./search";
@@ -32,6 +32,43 @@ import "./index.scss";
 import "highlight.js/styles/default.css";
 import "juejin-markdown-themes/dist/juejin.css";
 import "katex/dist/katex.css";
+
+declare global {
+	interface Window {
+		OSS?: any;
+		AliyunUpload?: any;
+	}
+}
+
+const ALIYUN_VOD_SCRIPT_PATHS = [
+	"/aliyun-vod/lib/es6-promise.min.js",
+	"/aliyun-vod/lib/aliyun-oss-sdk-6.17.1.min.js",
+	"/aliyun-vod/aliyun-upload-sdk-1.5.7.min.js"
+];
+
+const loadScript = (src: string) => {
+	return new Promise<void>((resolve, reject) => {
+		const existing = document.querySelector(`script[src="${src}"]`);
+		if (existing) {
+			resolve();
+			return;
+		}
+		const script = document.createElement("script");
+		script.src = src;
+		script.async = true;
+		script.onload = () => resolve();
+		script.onerror = () => reject(new Error(`加载脚本失败：${src}`));
+		document.body.appendChild(script);
+	});
+};
+
+const loadAliyunVodSdk = async () => {
+	if (window.AliyunUpload && window.OSS) return;
+	const host = (baseDomain || "").replace(/\/$/, "");
+	for (const path of ALIYUN_VOD_SCRIPT_PATHS) {
+		await loadScript(`${host}${path}`);
+	}
+};
 
 // 自定义插件：为图片添加 alt 标题
 const imageAltPlugin = () => ({
@@ -60,6 +97,37 @@ const imageAltPlugin = () => ({
 			imgElement.parentNode?.insertBefore(wrapper, imgElement);
 			wrapper.appendChild(imgElement);
 			wrapper.appendChild(caption);
+		});
+	}
+});
+
+const aliyunVodPreviewPlugin = () => ({
+	viewerEffect({ markdownBody }: { markdownBody: HTMLElement }) {
+		const links = markdownBody.querySelectorAll<HTMLAnchorElement>('a[href]');
+		links.forEach(link => {
+			if (link.textContent?.trim() !== "aliyun-vod" || link.dataset.vodRendered === "true") return;
+			const videoId = link.getAttribute("href") || "";
+			if (!/^[a-zA-Z0-9_-]+$/.test(videoId)) return;
+
+			const prev = link.previousSibling;
+			if (!prev || prev.nodeType !== Node.TEXT_NODE || !prev.textContent?.endsWith("@")) return;
+			const paragraph = link.parentElement?.tagName === "P" ? link.parentElement : null;
+			const standalone = paragraph?.textContent?.trim() === "@aliyun-vod";
+			prev.textContent = prev.textContent.slice(0, -1);
+
+			const container = document.createElement("div");
+			container.className = "video-container video-container--aliyun-vod";
+			const video = document.createElement("video");
+			video.src = `/video/play/redirect?videoId=${encodeURIComponent(videoId)}`;
+			video.controls = true;
+			video.preload = "metadata";
+			container.appendChild(video);
+
+			if (standalone && paragraph) {
+				paragraph.replaceWith(container);
+			} else {
+				link.replaceWith(container);
+			}
 		});
 	}
 });
@@ -263,6 +331,7 @@ const plugins = (
 	gemoji(),
 	math(),
 	imageAltPlugin(),
+	aliyunVodPreviewPlugin(),
 	imageMoveablePlugin(setTarget, onScroll, setContainer, getScrollInfo, setEditor, getImageSizeMap)
 	// Add more plugins here
 ];
@@ -1355,6 +1424,103 @@ const ArticleEdit: FC<IProps> = props => {
 		input.click();
 	};
 
+	const handleUploadVideo = () => {
+		const input = document.createElement("input");
+		input.type = "file";
+		input.accept = "video/*,audio/*";
+		input.style.display = "none";
+
+		input.onchange = async (e: Event) => {
+			const target = e.target as HTMLInputElement;
+			const file = target.files?.[0];
+			if (document.body.contains(input)) {
+				document.body.removeChild(input);
+			}
+			if (!file) return;
+			if (!/^video\/|^audio\//.test(file.type)) {
+				message.error("请选择视频或音频文件");
+				return;
+			}
+
+			const loadingKey = "aliyun-vod-upload";
+			let resolvedVideoId = "";
+			try {
+				await loadAliyunVodSdk();
+				if (!window.AliyunUpload || !window.OSS) {
+					message.error("阿里云上传 SDK 未加载");
+					return;
+				}
+
+				message.loading({ content: "视频准备上传...", key: loadingKey, duration: 0 });
+				await new Promise<void>((resolve, reject) => {
+					const uploader = new window.AliyunUpload.Vod({
+						userId: "paicoding",
+						region: "cn-shanghai",
+						partSize: 1048576,
+						parallel: 5,
+						retryCount: 3,
+						retryDuration: 2,
+						onUploadstarted: async (uploadInfo: any) => {
+							try {
+								const response: any = uploadInfo.videoId
+									? await refreshVodUploadAuthApi(uploadInfo.videoId)
+									: await createVodUploadAuthApi(file.name, file.name);
+								const result = response?.result;
+								if (!result?.uploadAuth || !result?.uploadAddress || !result?.videoId) {
+									reject(new Error("获取视频上传凭证失败"));
+									return;
+								}
+								resolvedVideoId = result.videoId;
+								uploader.setUploadAuthAndAddress(uploadInfo, result.uploadAuth, result.uploadAddress, result.videoId);
+							} catch (error) {
+								reject(error);
+							}
+						},
+						onUploadSucceed: (uploadInfo: any) => {
+							resolvedVideoId = resolvedVideoId || uploadInfo.videoId;
+							resolve();
+						},
+						onUploadFailed: (_uploadInfo: any, code: string, errorMessage: string) => {
+							reject(new Error(errorMessage || code || "视频上传失败"));
+						},
+						onUploadProgress: (_uploadInfo: any, _totalSize: number, progress: number) => {
+							message.loading({ content: `视频上传中 ${Math.ceil(progress * 100)}%`, key: loadingKey, duration: 0 });
+						},
+						onUploadTokenExpired: async (uploadInfo: any) => {
+							try {
+								const response: any = await refreshVodUploadAuthApi(resolvedVideoId || uploadInfo.videoId);
+								const result = response?.result;
+								if (!result?.uploadAuth) {
+									reject(new Error("刷新视频上传凭证失败"));
+									return;
+								}
+								resolvedVideoId = result.videoId || resolvedVideoId;
+								uploader.resumeUploadWithAuth(result.uploadAuth);
+							} catch (error) {
+								reject(error);
+							}
+						}
+					});
+
+					uploader.addFile(file, null, null, null, JSON.stringify({ Vod: { Title: file.name } }));
+					uploader.startUpload();
+				});
+
+				if (resolvedVideoId) {
+					const nextContent = `${content ? `${content.trimEnd()}\n\n` : ""}@[aliyun-vod](${resolvedVideoId})\n`;
+					setContent(nextContent);
+					handleChange({ content: nextContent });
+					message.success({ content: "视频上传成功，已插入文章", key: loadingKey });
+				}
+			} catch (error: any) {
+				message.error({ content: error?.message || "视频上传失败", key: loadingKey });
+			}
+		};
+
+		document.body.appendChild(input);
+		input.click();
+	};
+
 	// 导入 Word 文档
 	const handleImportWord = () => {
 		console.log("=== 开始导入 Word 文档 ===");
@@ -2328,6 +2494,7 @@ const ArticleEdit: FC<IProps> = props => {
 					handleReplaceImgUrl={handleReplaceImgUrl}
 					handleImportWord={handleImportWord}
 					handleImportMarkdown={handleImportMarkdown}
+					handleUploadVideo={handleUploadVideo}
 					handleSave={handleSaveOrUpdate}
 					goBack={goBack}
 				/>
