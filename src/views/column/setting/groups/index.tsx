@@ -4,8 +4,8 @@ import { FC, useEffect, useState } from "react";
 import React from "react";
 import { connect } from "react-redux";
 import { useLocation } from "react-router-dom";
-import { DeleteOutlined, EditOutlined, EyeOutlined, ImportOutlined, PlusOutlined } from "@ant-design/icons";
-import { Button, Card, Drawer, Form, Input, message, Modal, Space, Tooltip, Tree } from "antd";
+import { DeleteOutlined, EditOutlined, EyeOutlined, ImportOutlined, PlusOutlined, SettingOutlined } from "@ant-design/icons";
+import { Button, Card, Drawer, Form, Input, InputNumber, message, Modal, Radio, Space, Tag, Tooltip, Tree } from "antd";
 import type { DataNode } from "antd/es/tree";
 
 import { generateArticleSlugApi, updateArticleSlugApi } from "@/api/modules/article";
@@ -48,6 +48,8 @@ interface DataType {
 	column: string;
 	sort: number;
 	groupId: number;
+	readType?: number;
+	previewPercent?: number;
 }
 
 export interface IMoveType {
@@ -69,6 +71,8 @@ export interface IFormType {
 	sort: number; // 排序
 	groupId: number; // 分组id
 	groupName: string; // 分组名
+	read?: number; // 教程文章阅读类型
+	previewPercent?: number; // 未解锁试看比例
 }
 
 const defaultInitForm: IFormType = {
@@ -80,7 +84,29 @@ const defaultInitForm: IFormType = {
 	column: "",
 	sort: -1,
 	groupId: 0,
-	groupName: ""
+	groupName: "",
+	read: 0,
+	previewPercent: 0
+};
+
+const articleReadOptions = [
+	{ label: "沿用专栏", value: 0 },
+	{ label: "登录阅读", value: 1 },
+	{ label: "试读", value: 2 },
+	{ label: "星球 VIP", value: 3 }
+];
+
+const getReadTag = (readType?: number) => {
+	switch (readType) {
+		case 1:
+			return <Tag color="blue">登录</Tag>;
+		case 2:
+			return <Tag color="green">试读</Tag>;
+		case 3:
+			return <Tag color="gold">星球</Tag>;
+		default:
+			return <Tag>沿用</Tag>;
+	}
 };
 
 const normalizeUrlSlug = (value?: string) =>
@@ -96,6 +122,9 @@ const isValidUrlSlug = (value?: string) => {
 const ColumnArticle: FC<IProps> = props => {
 	const [formRef] = Form.useForm();
 	const [slugFormRef] = Form.useForm();
+	const [accessFormRef] = Form.useForm();
+	const selectedImportRead = Form.useWatch("read", formRef) ?? 0;
+	const selectedAccessRead = Form.useWatch("read", accessFormRef) ?? 0;
 	// 分组列表数据
 	const [groupTree, setGroupTree] = useState<GroupData[]>([]);
 
@@ -110,6 +139,8 @@ const ColumnArticle: FC<IProps> = props => {
 	const [currentColumnUrlSlug, setCurrentColumnUrlSlug] = useState<string>(columnUrlSlug || "");
 	const [currentSlugArticle, setCurrentSlugArticle] = useState<DataType>();
 	const [isSlugModalVisible, setIsSlugModalVisible] = useState<boolean>(false);
+	const [currentAccessArticle, setCurrentAccessArticle] = useState<DataType>();
+	const [isAccessModalVisible, setIsAccessModalVisible] = useState<boolean>(false);
 	const [editingUrlSlug, setEditingUrlSlug] = useState<string>("");
 	const [slugGenerating, setSlugGenerating] = useState<boolean>(false);
 	const [slugSaving, setSlugSaving] = useState<boolean>(false);
@@ -167,10 +198,27 @@ const ColumnArticle: FC<IProps> = props => {
 							<div className="tree-node-row">
 								<span className="tree-node-title">
 									<span className="tree-node-id">{article.articleId}</span>
-									<span className="tree-node-name">{article.shortTitle}</span>
+									<span className="tree-node-name">{article.shortTitle || article.title}</span>
 									{article.urlSlug && <span className="tree-node-slug">/{article.urlSlug}</span>}
+									<span className="tree-node-tag">{getReadTag(article.readType)}</span>
+									{article.readType !== 2 && !!article.previewPercent && article.previewPercent > 0 && (
+										<Tag className="tree-node-tag" color="purple">
+											开放 {article.previewPercent}%
+										</Tag>
+									)}
 								</span>
 								<div className="group-node-buttons">
+									<Tooltip title="访问设置">
+										<Button
+											type="text"
+											size="small"
+											icon={<SettingOutlined />}
+											onClick={e => {
+												e.stopPropagation();
+												openAccessModal(article);
+											}}
+										/>
+									</Tooltip>
 									<Tooltip title="修改 URL Slug">
 										<Button
 											type="text"
@@ -251,6 +299,9 @@ const ColumnArticle: FC<IProps> = props => {
 									onClick={e => {
 										e.stopPropagation();
 										setCurrentGroup(group);
+										setForm(defaultInitForm);
+										formRef.resetFields();
+										formRef.setFieldsValue({ groupId: group.groupId, read: 0, previewPercent: 0 });
 										setIsImportDrawerVisible(true);
 									}}
 								></Button>
@@ -394,6 +445,45 @@ const ColumnArticle: FC<IProps> = props => {
 				}
 			}
 		});
+	};
+
+	const openAccessModal = (article: DataType) => {
+		setCurrentAccessArticle(article);
+		accessFormRef.setFieldsValue({
+			read: article.readType ?? 0,
+			previewPercent: article.previewPercent ?? 0
+		});
+		setIsAccessModalVisible(true);
+	};
+
+	const handleSaveArticleAccess = async () => {
+		if (!currentAccessArticle) return;
+		const values = await accessFormRef.validateFields();
+		const read = Number(values.read ?? 0);
+		const previewPercent = read === 2 ? 0 : Number(values.previewPercent ?? 0);
+		const payload: IFormType = {
+			id: currentAccessArticle.id,
+			articleId: Number(currentAccessArticle.articleId),
+			title: currentAccessArticle.title,
+			shortTitle: currentAccessArticle.shortTitle || currentAccessArticle.title,
+			columnId: columnIdParam,
+			column: currentAccessArticle.column,
+			sort: currentAccessArticle.sort,
+			groupId: currentAccessArticle.groupId || 0,
+			groupName: "",
+			read,
+			previewPercent
+		};
+
+		const { status: successStatus } = (await updateColumnArticleApi(payload)) || {};
+		const { code, msg } = successStatus || {};
+		if (code === 0) {
+			message.success("教程访问设置已保存");
+			setIsAccessModalVisible(false);
+			await fetchTreeData();
+		} else {
+			message.error(msg || "教程访问设置保存失败");
+		}
 	};
 
 	const openSlugModal = (article: DataType) => {
@@ -563,7 +653,7 @@ const ColumnArticle: FC<IProps> = props => {
 	};
 	const reviseDrawerContent = (
 		<Form name="basic" form={formRef} labelCol={{ span: 4 }} wrapperCol={{ span: 16 }} autoComplete="off">
-			<Form.Item label="分组" name="groupId">
+			<Form.Item label="分组">
 				{currentGroup?.title}
 			</Form.Item>
 
@@ -583,6 +673,19 @@ const ColumnArticle: FC<IProps> = props => {
 					onChange={e => handleChange({ shortTitle: e.target.value })}
 				/>
 			</Form.Item>
+
+			<Form.Item label="阅读类型" name="read" initialValue={0}>
+				<Radio.Group options={articleReadOptions} optionType="button" buttonStyle="solid" />
+			</Form.Item>
+
+			<Form.Item
+				label="开放比例"
+				name="previewPercent"
+				initialValue={0}
+				extra="0 表示沿用全局试看字数；试读会全文开放，并在用户端标记为试读"
+			>
+				<InputNumber min={0} max={99} addonAfter="%" disabled={selectedImportRead === 2} />
+			</Form.Item>
 		</Form>
 	);
 
@@ -592,7 +695,9 @@ const ColumnArticle: FC<IProps> = props => {
 		const newValues = {
 			...values,
 			columnId: columnIdParam,
-			groupId: currentGroup?.groupId || 0
+			groupId: currentGroup?.groupId || 0,
+			read: Number(values.read ?? 0),
+			previewPercent: Number(values.read ?? 0) === 2 ? 0 : Number(values.previewPercent ?? 0)
 		};
 		console.log("提交的值:", newValues);
 
@@ -717,6 +822,36 @@ const ColumnArticle: FC<IProps> = props => {
 								handleSlugInputChange(e.target.value);
 							}}
 						/>
+					</Form.Item>
+				</Form>
+			</Modal>
+			<Modal
+				title="教程访问设置"
+				open={isAccessModalVisible}
+				onCancel={() => setIsAccessModalVisible(false)}
+				footer={[
+					<Button key="cancel" onClick={() => setIsAccessModalVisible(false)}>
+						取消
+					</Button>,
+					<Button key="save" type="primary" onClick={handleSaveArticleAccess}>
+						保存
+					</Button>
+				]}
+			>
+				<Form form={accessFormRef} layout="vertical" autoComplete="off">
+					<Form.Item label="教程文章">
+						<span>{currentAccessArticle?.shortTitle || currentAccessArticle?.title || "-"}</span>
+					</Form.Item>
+					<Form.Item label="阅读类型" name="read" initialValue={0}>
+						<Radio.Group options={articleReadOptions} optionType="button" buttonStyle="solid" />
+					</Form.Item>
+					<Form.Item
+						label="未解锁开放比例"
+						name="previewPercent"
+						initialValue={0}
+						extra="0 表示沿用全局试看字数；试读会全文开放，并在用户端标记为试读"
+					>
+						<InputNumber min={0} max={99} addonAfter="%" disabled={selectedAccessRead === 2} />
 					</Form.Item>
 				</Form>
 			</Modal>

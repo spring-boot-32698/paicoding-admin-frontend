@@ -476,6 +476,7 @@ const ArticleEdit: FC<IProps> = props => {
 
 	// 文章内容
 	const [content, setContent] = useState<string>("");
+	const contentRef = useRef<string>("");
 
 	// 抽屉
 	const [isOpenDrawerShow, setIsOpenDrawerShow] = useState<boolean>(false);
@@ -575,6 +576,10 @@ const ArticleEdit: FC<IProps> = props => {
 		// 使用函数式更新，避免多次连续调用时的状态覆盖问题
 		setForm(prev => ({ ...prev, ...item }));
 	};
+
+	useEffect(() => {
+		contentRef.current = content;
+	}, [content]);
 
 	const handleFormRefChange = (item: MapItem) => {
 		// 当自定义组件更新时，对 formRef 也进行更新
@@ -1490,7 +1495,55 @@ const ArticleEdit: FC<IProps> = props => {
 		input.click();
 	};
 
+	const getVideoInsertSnapshot = () => {
+		const editor = editorRef.current;
+		const currentValue = typeof editor?.getValue === "function" ? editor.getValue() : contentRef.current;
+		if (typeof editor?.getCursor === "function" && typeof editor?.indexFromPos === "function") {
+			return {
+				index: editor.indexFromPos(editor.getCursor()),
+				value: currentValue
+			};
+		}
+
+		return {
+			index: currentValue.length,
+			value: currentValue
+		};
+	};
+
+	const buildBlockInsertion = (value: string, index: number, block: string) => {
+		const safeIndex = Math.max(0, Math.min(index, value.length));
+		const before = value.slice(0, safeIndex);
+		const after = value.slice(safeIndex);
+		const prefix = before && !before.endsWith("\n\n") ? (before.endsWith("\n") ? "\n" : "\n\n") : "";
+		const suffix = after ? (after.startsWith("\n\n") ? "" : after.startsWith("\n") ? "\n" : "\n\n") : "\n";
+		const insertText = `${prefix}${block}${suffix}`;
+
+		return {
+			nextContent: `${before}${insertText}${after}`,
+			cursorIndex: before.length + insertText.length
+		};
+	};
+
+	const insertVideoAtSnapshot = (videoId: string, snapshot: { index: number; value: string }) => {
+		const editor = editorRef.current;
+		const currentValue = typeof editor?.getValue === "function" ? editor.getValue() : contentRef.current || snapshot.value;
+		const { nextContent, cursorIndex } = buildBlockInsertion(currentValue, snapshot.index, `@[aliyun-vod](${videoId})`);
+
+		setContent(nextContent);
+		handleChange({ content: nextContent });
+		contentRef.current = nextContent;
+
+		setTimeout(() => {
+			if (typeof editor?.posFromIndex === "function" && typeof editor?.setCursor === "function") {
+				editor.setCursor(editor.posFromIndex(cursorIndex));
+				editor.focus?.();
+			}
+		});
+	};
+
 	const handleUploadVideo = () => {
+		const insertSnapshot = getVideoInsertSnapshot();
 		const input = document.createElement("input");
 		input.type = "file";
 		input.accept = "video/*,audio/*";
@@ -1573,9 +1626,7 @@ const ArticleEdit: FC<IProps> = props => {
 				});
 
 				if (resolvedVideoId) {
-					const nextContent = `${content ? `${content.trimEnd()}\n\n` : ""}@[aliyun-vod](${resolvedVideoId})\n`;
-					setContent(nextContent);
-					handleChange({ content: nextContent });
+					insertVideoAtSnapshot(resolvedVideoId, insertSnapshot);
 					message.success({ content: "视频上传成功，已插入文章", key: loadingKey });
 				}
 			} catch (error: any) {

@@ -9,6 +9,17 @@ import { IMoveType } from "@/views/column/setting/groups";
  * @name 教程模块
  */
 
+export interface IColumnArticleForm {
+	id?: number;
+	articleId?: number;
+	shortTitle?: string;
+	columnId?: number;
+	groupId?: number;
+	sort?: number;
+	read?: number;
+	previewPercent?: number;
+}
+
 // 获取列表
 export const getColumnListApi = (data: { pageNumber: number; pageSize: number }) => {
 	return http.post(`${PORT1}/column/list`, data);
@@ -65,7 +76,7 @@ export const deleteGroupApi = (groupId: number) => {
 };
 
 // 保存操作
-export const updateColumnArticleApi = (form: IFormType) => {
+export const updateColumnArticleApi = (form: IColumnArticleForm) => {
 	return http.post<Login.ResAuthButtons>(`${PORT1}/column/saveColumnArticle`, form);
 };
 
