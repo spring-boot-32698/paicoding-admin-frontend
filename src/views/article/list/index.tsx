@@ -476,9 +476,7 @@ const Article: FC<IProps> = props => {
 			key: "title",
 			render(value, item) {
 				const { urlSlug, articleId, shortTitle } = item;
-				const fullUrl = urlSlug 
-					? `${baseDomain}/article/detail/${articleId}/${urlSlug}`
-					: `${baseDomain}/article/detail/${articleId}`;
+				const fullUrl = urlSlug ? `${baseDomain}/${urlSlug}` : `${baseDomain}/article/detail/${articleId}`;
 				const tooltipContent = (
 					<div>
 						<div>{fullUrl}</div>

@@ -4,7 +4,7 @@ import { createPortal } from "react-dom";
 import Moveable, { OnResize, OnResizeEnd } from "react-moveable";
 import { connect } from "react-redux";
 import { useLocation, useNavigate } from "react-router";
-import { ReloadOutlined, SwapOutlined, CopyOutlined } from "@ant-design/icons";
+import { CopyOutlined, ReloadOutlined, SwapOutlined } from "@ant-design/icons";
 import gemoji from "@bytemd/plugin-gemoji";
 import gfm from "@bytemd/plugin-gfm";
 import highlight from "@bytemd/plugin-highlight";
@@ -16,7 +16,7 @@ import zhHans from "bytemd/locales/zh_Hans.json";
 import { throttle } from "lodash";
 import mammoth from "mammoth";
 
-import { generateArticleAiApi, getArticleApi, saveArticleApi, saveImgApi } from "@/api/modules/article";
+import { generateArticleAiApi, generateArticleSlugApi, getArticleApi, saveArticleApi, saveImgApi } from "@/api/modules/article";
 import { createVodUploadAuthApi, refreshVodUploadAuthApi, uploadImgApi } from "@/api/modules/common";
 import { getTagListApi } from "@/api/modules/tag";
 import { ContentInterWrap, ContentWrap } from "@/components/common-wrap";
@@ -357,6 +357,7 @@ export interface IFormType {
 	cover: string; // 封面
 	tagIds: number[]; // 标签
 	shortTitle: string; // 短标题
+	urlSlug: string; // 语义 URL
 	readType: number; // 阅读类型
 	payWay: string; // 付费方式
 	payAmount: number; // 付费金额（元）
@@ -372,6 +373,7 @@ const defaultInitForm: IFormType = {
 	cover: "",
 	tagIds: [],
 	shortTitle: "",
+	urlSlug: "",
 	readType: 0,
 	payWay: "wx_native",
 	payAmount: 0.99
@@ -395,6 +397,7 @@ const ArticleEdit: FC<IProps> = props => {
 	const selectedPayWay = Form.useWatch("payWay", formRef) ?? defaultInitForm.payWay;
 
 	const [form, setForm] = useState<IFormType>(defaultInitForm);
+	const [slugGenerating, setSlugGenerating] = useState<boolean>(false);
 
 	// Moveable target
 	const [target, setTarget] = useState<HTMLElement | null>(null);
@@ -576,6 +579,51 @@ const ArticleEdit: FC<IProps> = props => {
 	const handleFormRefChange = (item: MapItem) => {
 		// 当自定义组件更新时，对 formRef 也进行更新
 		formRef.setFieldsValue({ ...item });
+	};
+
+	const normalizeUrlSlug = (value?: string) => (value || "").trim().toLowerCase();
+
+	const isValidUrlSlug = (value: string) => {
+		return !value || (/^[a-z0-9][a-z0-9-]*$/.test(value) && !/^[0-9]+$/.test(value));
+	};
+
+	const buildUrlSlugFromFileName = (fileName: string) => {
+		const prefix = fileName.replace(/\.(md|markdown|txt)$/i, "");
+		return normalizeUrlSlug(prefix)
+			.replace(/[\s_]+/g, "-")
+			.replace(/[^a-z0-9-]/g, "")
+			.replace(/-+/g, "-")
+			.replace(/^-+|-+$/g, "");
+	};
+
+	const handleGenerateUrlSlug = async (source?: { title?: string; shortTitle?: string }, silent = false) => {
+		const values = source || formRef.getFieldsValue(["title", "shortTitle"]);
+		const title = values.title?.trim();
+		const shortTitle = values.shortTitle?.trim();
+		if (!title && !shortTitle) {
+			if (!silent) message.warning("请先填写标题或短标题");
+			return "";
+		}
+
+		setSlugGenerating(true);
+		try {
+			const { result } = await generateArticleSlugApi({ title, shortTitle, articleId: form.articleId || articleId });
+			const urlSlug = normalizeUrlSlug(String(result || ""));
+			if (!urlSlug) {
+				if (!silent) message.warning("没有生成可用的语义 URL");
+				return "";
+			}
+			formRef.setFieldsValue({ urlSlug });
+			handleChange({ urlSlug });
+			if (!silent) message.success("语义 URL 生成成功");
+			return urlSlug;
+		} catch (error) {
+			console.log("生成语义 URL 失败", error);
+			if (!silent) message.error("语义 URL 生成失败");
+			return "";
+		} finally {
+			setSlugGenerating(false);
+		}
 	};
 
 	// 抽屉关闭
@@ -1262,6 +1310,7 @@ const ArticleEdit: FC<IProps> = props => {
 				message.error("仅支持 .md/.markdown/.txt 文件");
 				return;
 			}
+			const fileNameSlug = buildUrlSlugFromFileName(fileName);
 
 			const loadingKey = "markdown-import-loading";
 			message.loading({ content: "正在导入 Markdown...", key: loadingKey, duration: 0 });
@@ -1297,6 +1346,7 @@ const ArticleEdit: FC<IProps> = props => {
 				if (fmData) {
 					if (fmData.title) updateData.title = fmData.title;
 					if (fmData.shortTitle) updateData.shortTitle = fmData.shortTitle;
+					if (fmData.urlSlug || fmData.slug) updateData.urlSlug = normalizeUrlSlug(fmData.urlSlug || fmData.slug);
 					if (fmData.description) updateData.summary = fmData.description;
 
 					// 状态设置为已发布 (Number 格式用于 form 状态)
@@ -1379,10 +1429,26 @@ const ArticleEdit: FC<IProps> = props => {
 
 				// 4. 执行更新
 				const finalUpdateData: MapItem = { ...updateData, content: markdown };
+				if (isValidUrlSlug(fileNameSlug) && fileNameSlug) {
+					finalUpdateData.urlSlug = fileNameSlug;
+				}
 
 				// 处理标题逻辑：优先使用模板里的，没有则使用 H1
 				if (!finalUpdateData.shortTitle && articleTitle) {
 					finalUpdateData.shortTitle = articleTitle;
+				}
+
+				if (!finalUpdateData.urlSlug && finalUpdateData.shortTitle) {
+					const generatedSlug = await handleGenerateUrlSlug(
+						{
+							title: finalUpdateData.title,
+							shortTitle: finalUpdateData.shortTitle
+						},
+						true
+					);
+					if (generatedSlug) {
+						finalUpdateData.urlSlug = generatedSlug;
+					}
 				}
 
 				if (shouldImport === "append") {
@@ -2097,8 +2163,12 @@ const ArticleEdit: FC<IProps> = props => {
 					setContent(markdown);
 					// 如果提取到了标题，同步更新标题
 					if (articleTitle) {
-						handleChange({ content: markdown, shortTitle: articleTitle });
-						formRef.setFieldsValue({ shortTitle: articleTitle });
+						const generatedSlug = await handleGenerateUrlSlug({ shortTitle: articleTitle }, true);
+						const updateData = generatedSlug
+							? { content: markdown, shortTitle: articleTitle, urlSlug: generatedSlug }
+							: { content: markdown, shortTitle: articleTitle };
+						handleChange(updateData);
+						formRef.setFieldsValue(updateData);
 					} else {
 						handleChange({ content: markdown });
 					}
@@ -2188,11 +2258,17 @@ const ArticleEdit: FC<IProps> = props => {
 					console.warn("获取默认标签失败:", tagError);
 				}
 
+				const generatedSlug = await handleGenerateUrlSlug({ title, shortTitle }, true);
+				if (generatedSlug) {
+					updateData.urlSlug = generatedSlug;
+				}
+
 				// 5. 执行回填
 				handleChange(updateData);
 				formRef.setFieldsValue({
 					title,
 					summary: description,
+					urlSlug: updateData.urlSlug,
 					status: "0",
 					categoryId: updateData.categoryId,
 					readType: updateData.readType ?? defaultInitForm.readType
@@ -2227,6 +2303,11 @@ const ArticleEdit: FC<IProps> = props => {
 
 		const values = await formRef.validateFields();
 		console.log("handleSubmit 时看看form的值 values", values);
+		const urlSlug = normalizeUrlSlug(values.urlSlug);
+		if (!isValidUrlSlug(urlSlug)) {
+			message.error("URL Slug 只能包含小写字母、数字和连字符，且不能是纯数字");
+			return;
+		}
 
 		const normalizedReadType = Number(values.readType ?? defaultInitForm.readType);
 		const normalizedPayWay = normalizedReadType === 4 ? values.payWay || defaultInitForm.payWay : undefined;
@@ -2243,6 +2324,7 @@ const ArticleEdit: FC<IProps> = props => {
 			content: content,
 			tagIds: tagIds,
 			shortTitle: shortTitle,
+			urlSlug,
 			// 确定的参数
 			articleType: "BLOG",
 			source: 2,
@@ -2293,6 +2375,7 @@ const ArticleEdit: FC<IProps> = props => {
 				formRef.setFieldsValue({
 					title: result?.title,
 					shortTitle: result?.shortTitle,
+					urlSlug: result?.urlSlug,
 					summary: result?.summary,
 					cover: coverUrl,
 					status: result?.status?.toString(),
@@ -2312,6 +2395,7 @@ const ArticleEdit: FC<IProps> = props => {
 					content: result?.content,
 					articleId: result?.articleId,
 					shortTitle: result?.shortTitle,
+					urlSlug: result?.urlSlug,
 					status: result?.status,
 					readType: result?.readType ?? defaultInitForm.readType,
 					payWay: result?.payWay || defaultInitForm.payWay,
@@ -2377,6 +2461,41 @@ const ArticleEdit: FC<IProps> = props => {
 						handleChange({ shortTitle: e.target.value });
 					}}
 				/>
+			</Form.Item>
+			<Form.Item
+				label="URL Slug"
+				tooltip="保存后文章访问地址为 https://xxx/{urlSlug}"
+				extra={form.urlSlug ? `访问路径：${baseDomain || ""}/${form.urlSlug}` : "导入文章后会优先根据短标题自动生成"}
+			>
+				<Space.Compact style={{ width: "100%" }}>
+					<Form.Item
+						name="urlSlug"
+						noStyle
+						rules={[
+							{
+								validator: (_, value) => {
+									const urlSlug = normalizeUrlSlug(value);
+									if (isValidUrlSlug(urlSlug)) return Promise.resolve();
+									return Promise.reject(new Error("只能包含小写字母、数字和连字符，且不能是纯数字"));
+								}
+							}
+						]}
+					>
+						<Input
+							allowClear
+							maxLength={100}
+							placeholder="如 pai-smart-resume"
+							onChange={e => {
+								const urlSlug = normalizeUrlSlug(e.target.value);
+								formRef.setFieldsValue({ urlSlug });
+								handleChange({ urlSlug });
+							}}
+						/>
+					</Form.Item>
+					<Button loading={slugGenerating} onClick={() => handleGenerateUrlSlug()}>
+						生成
+					</Button>
+				</Space.Compact>
 			</Form.Item>
 			<Form.Item label="简介" name="summary" rules={[{ required: true, message: "请输入简介!" }]}>
 				<TextArea

@@ -1,25 +1,25 @@
 /* eslint-disable react/jsx-no-comment-textnodes */
 /* eslint-disable prettier/prettier */
-import { FC, useCallback, useEffect, useState } from "react";
+import { FC, useEffect, useState } from "react";
 import React from "react";
 import { connect } from "react-redux";
-import { useLocation, useNavigate } from "react-router-dom";
-import { DeleteOutlined, EditOutlined, EyeOutlined, ImportOutlined, PlusOutlined, SwapOutlined } from "@ant-design/icons";
-import { Button, Card, Descriptions, Drawer, Form, Input, InputNumber, message, Modal, Space, Table, Tooltip, Tree } from "antd";
+import { useLocation } from "react-router-dom";
+import { DeleteOutlined, EditOutlined, EyeOutlined, ImportOutlined, PlusOutlined } from "@ant-design/icons";
+import { Button, Card, Drawer, Form, Input, message, Modal, Space, Tooltip, Tree } from "antd";
 import type { DataNode } from "antd/es/tree";
 
+import { generateArticleSlugApi, updateArticleSlugApi } from "@/api/modules/article";
 import {
 	delColumnArticleApi,
 	deleteGroupApi,
+	getColumnDetailApi,
 	getColumnGroupArticlesApi,
 	moveColumnArticleOrGroup,
-	sortColumnArticleApi,
-	sortColumnArticleByIDApi,
 	updateColumnArticleApi,
 	updateGroupApi
 } from "@/api/modules/column";
-import { ContentInterWrap, ContentWrap } from "@/components/common-wrap";
 import { MapItem } from "@/typings/common";
+import { baseDomain } from "@/utils/util";
 import TableSelect from "@/views/column/article/components/tableselect/TableSelect";
 
 import "./index.scss";
@@ -42,6 +42,7 @@ interface DataType {
 	id: number;
 	articleId: string;
 	title: string;
+	urlSlug: string;
 	shortTitle: string;
 	columnId: number;
 	column: string;
@@ -82,8 +83,19 @@ const defaultInitForm: IFormType = {
 	groupName: ""
 };
 
+const normalizeUrlSlug = (value?: string) =>
+	String(value || "")
+		.trim()
+		.toLowerCase();
+
+const isValidUrlSlug = (value?: string) => {
+	const urlSlug = normalizeUrlSlug(value);
+	return !!urlSlug && /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(urlSlug) && !/^\d+$/.test(urlSlug);
+};
+
 const ColumnArticle: FC<IProps> = props => {
 	const [formRef] = Form.useForm();
+	const [slugFormRef] = Form.useForm();
 	// 分组列表数据
 	const [groupTree, setGroupTree] = useState<GroupData[]>([]);
 
@@ -93,12 +105,30 @@ const ColumnArticle: FC<IProps> = props => {
 	const [isEditModalVisible, setIsEditModalVisible] = useState<boolean>(false);
 	const [isImportDrawerVisible, setIsImportDrawerVisible] = useState<boolean>(false);
 
-	// 刷新函数
-	const [query, setQuery] = useState<number>(0);
-
 	const location = useLocation();
-	const navigate = useNavigate();
-	const { columnId: columnIdParam, column: columnParam } = location.state || {};
+	const { columnId: columnIdParam, column: columnParam, urlSlug: columnUrlSlug } = location.state || {};
+	const [currentColumnUrlSlug, setCurrentColumnUrlSlug] = useState<string>(columnUrlSlug || "");
+	const [currentSlugArticle, setCurrentSlugArticle] = useState<DataType>();
+	const [isSlugModalVisible, setIsSlugModalVisible] = useState<boolean>(false);
+	const [editingUrlSlug, setEditingUrlSlug] = useState<string>("");
+	const [slugGenerating, setSlugGenerating] = useState<boolean>(false);
+	const [slugSaving, setSlugSaving] = useState<boolean>(false);
+
+	const buildArticlePreviewUrl = (article: DataType) => {
+		return article.urlSlug
+			? `${baseDomain}/${article.urlSlug}`
+			: `${baseDomain}/column/${currentColumnUrlSlug || columnIdParam}/${article.sort}`;
+	};
+
+	const fetchColumnMeta = async () => {
+		if (!columnIdParam) return;
+		const { status, result } = await getColumnDetailApi(columnIdParam);
+		const { code } = status || {};
+		if (code === 0 && result) {
+			const column = result as { urlSlug?: string };
+			setCurrentColumnUrlSlug(column.urlSlug || "");
+		}
+	};
 
 	const fetchTreeData = async () => {
 		const { status, result } = await getColumnGroupArticlesApi(columnIdParam);
@@ -113,6 +143,7 @@ const ColumnArticle: FC<IProps> = props => {
 
 	// 数据请求
 	useEffect(() => {
+		fetchColumnMeta();
 		fetchTreeData();
 	}, []);
 
@@ -129,15 +160,39 @@ const ColumnArticle: FC<IProps> = props => {
 			// 然后添加文章
 			if (group.articles && group.articles.length > 0) {
 				group.articles.forEach(article => {
+					const articleId = Number(article.articleId);
 					childrenNodes.push({
 						key: `article-${article.articleId}`,
 						title: (
-							<div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%" }}>
-								<span>
-									<span style={{ fontSize: "0.6rem", color: "gray", fontStyle: "italic" }}>{article.articleId}</span>
-									<span>{article.shortTitle}</span>
+							<div className="tree-node-row">
+								<span className="tree-node-title">
+									<span className="tree-node-id">{article.articleId}</span>
+									<span className="tree-node-name">{article.shortTitle}</span>
+									{article.urlSlug && <span className="tree-node-slug">/{article.urlSlug}</span>}
 								</span>
 								<div className="group-node-buttons">
+									<Tooltip title="修改 URL Slug">
+										<Button
+											type="text"
+											size="small"
+											icon={<EditOutlined />}
+											onClick={e => {
+												e.stopPropagation();
+												openSlugModal(article);
+											}}
+										/>
+									</Tooltip>
+									<Tooltip title="预览教程">
+										<Button
+											type="text"
+											size="small"
+											icon={<EyeOutlined />}
+											onClick={e => {
+												e.stopPropagation();
+												window.open(buildArticlePreviewUrl(article), "_blank", "noreferrer");
+											}}
+										/>
+									</Tooltip>
 									<Button
 										type="text"
 										size="small"
@@ -145,7 +200,7 @@ const ColumnArticle: FC<IProps> = props => {
 										icon={<DeleteOutlined />}
 										onClick={e => {
 											e.stopPropagation();
-											handleDeleteColumnArticle(article.id);
+											handleDeleteColumnArticle(article.id, articleId);
 										}}
 									/>
 								</div>
@@ -160,12 +215,12 @@ const ColumnArticle: FC<IProps> = props => {
 			return {
 				key: `group-${group.groupId}`,
 				title: (
-					<div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%" }}>
-						<span>
-							<span style={{ fontSize: "0.6rem", color: "gray", fontStyle: "italic" }}>{group.groupId}</span>
-							<span>{group.title}</span>
+					<div className="tree-node-row">
+						<span className="tree-node-title">
+							<span className="tree-node-id">{group.groupId}</span>
+							<span className="tree-node-name">{group.title}</span>
 						</span>
-						<Space size="small" style={{ marginLeft: "2rem" }}>
+						<Space size="small" className="tree-node-actions">
 							<div className="group-node-buttons">
 								<Button
 									type="link"
@@ -321,7 +376,7 @@ const ColumnArticle: FC<IProps> = props => {
 		}
 	};
 
-	const handleDeleteColumnArticle = async (articleId: number) => {
+	const handleDeleteColumnArticle = async (id: number, articleId: number) => {
 		// 删除专栏中的教程
 		Modal.warning({
 			title: "确认删除此专栏的教程吗",
@@ -329,7 +384,7 @@ const ColumnArticle: FC<IProps> = props => {
 			maskClosable: true,
 			closable: true,
 			onOk: async () => {
-				const { status } = await delColumnArticleApi(articleId);
+				const { status } = await delColumnArticleApi(id);
 				const { code, msg } = status || {};
 				if (code === 0) {
 					message.success("删除成功");
@@ -341,9 +396,71 @@ const ColumnArticle: FC<IProps> = props => {
 		});
 	};
 
+	const openSlugModal = (article: DataType) => {
+		const urlSlug = normalizeUrlSlug(article.urlSlug);
+		setCurrentSlugArticle(article);
+		setEditingUrlSlug(urlSlug);
+		slugFormRef.setFieldsValue({ urlSlug });
+		setIsSlugModalVisible(true);
+	};
+
+	const handleGenerateArticleSlug = async () => {
+		if (!currentSlugArticle) return;
+		setSlugGenerating(true);
+		try {
+			const { status, result } =
+				(await generateArticleSlugApi({
+					title: currentSlugArticle.title,
+					shortTitle: currentSlugArticle.shortTitle,
+					articleId: currentSlugArticle.articleId,
+					columnUrlSlug: currentColumnUrlSlug
+				})) || {};
+			const { code, msg } = status || {};
+			if (code === 0 && result) {
+				const urlSlug = normalizeUrlSlug(String(result));
+				setEditingUrlSlug(urlSlug);
+				slugFormRef.setFieldsValue({ urlSlug });
+				message.success("语义 URL 生成成功");
+			} else {
+				message.error(msg || "语义 URL 生成失败");
+			}
+		} finally {
+			setSlugGenerating(false);
+		}
+	};
+
+	const handleSaveArticleSlug = async () => {
+		if (!currentSlugArticle) return;
+		const values = await slugFormRef.validateFields();
+		const urlSlug = normalizeUrlSlug(values.urlSlug);
+		setSlugSaving(true);
+		try {
+			const { status, result } =
+				(await updateArticleSlugApi({
+					articleId: currentSlugArticle.articleId,
+					columnId: columnIdParam,
+					urlSlug
+				})) || {};
+			const { code, msg } = status || {};
+			if (code === 0) {
+				message.success(`URL Slug 已更新为 ${result || urlSlug}`);
+				setIsSlugModalVisible(false);
+				await fetchTreeData();
+			} else {
+				message.error(msg || "URL Slug 更新失败");
+			}
+		} finally {
+			setSlugSaving(false);
+		}
+	};
+
+	const handleSlugInputChange = (value: string) => {
+		const urlSlug = normalizeUrlSlug(value);
+		setEditingUrlSlug(urlSlug);
+		slugFormRef.setFieldsValue({ urlSlug });
+	};
+
 	// 专栏内容进行拖拽，支持文章 拖拽； 分组拖拽
-	// form值（详情和新增的时候会用到）
-	const [moveForm, setMoveForm] = useState<IMoveType>();
 	const handleDrop = async (info: any) => {
 		const { dragNode, node, dropToGap } = info;
 		console.log("info对象", info);
@@ -552,6 +669,56 @@ const ColumnArticle: FC<IProps> = props => {
 				]}
 			>
 				<Input placeholder="请输入目录名称" value={newGroupName} onChange={e => setNewGroupName(e.target.value)} />
+			</Modal>
+			<Modal
+				title="修改教程文章 URL Slug"
+				open={isSlugModalVisible}
+				onCancel={() => setIsSlugModalVisible(false)}
+				footer={[
+					<Button key="cancel" onClick={() => setIsSlugModalVisible(false)}>
+						取消
+					</Button>,
+					<Button key="generate" loading={slugGenerating} onClick={handleGenerateArticleSlug}>
+						AI 生成
+					</Button>,
+					<Button key="save" type="primary" loading={slugSaving} onClick={handleSaveArticleSlug}>
+						保存
+					</Button>
+				]}
+			>
+				<Form form={slugFormRef} layout="vertical" autoComplete="off">
+					<Form.Item label="文章标题">
+						<span>{currentSlugArticle?.shortTitle || currentSlugArticle?.title || "-"}</span>
+					</Form.Item>
+					<Form.Item label="专栏 URL">
+						<span>{currentColumnUrlSlug ? `/${currentColumnUrlSlug}` : "-"}</span>
+					</Form.Item>
+					<Form.Item
+						label="文章 URL Slug"
+						name="urlSlug"
+						rules={[
+							{
+								validator: (_, value) =>
+									isValidUrlSlug(value)
+										? Promise.resolve()
+										: Promise.reject(new Error("只能包含小写字母、数字和连字符，且不能是纯数字"))
+							}
+						]}
+						extra={
+							currentColumnUrlSlug
+								? `文章访问路径示例：${baseDomain}/${editingUrlSlug || "{slug}"}`
+								: "保存后文章访问地址会使用这个 slug"
+						}
+					>
+						<Input
+							allowClear
+							placeholder="例如 quickstart"
+							onChange={e => {
+								handleSlugInputChange(e.target.value);
+							}}
+						/>
+					</Form.Item>
+				</Form>
 			</Modal>
 			<Drawer
 				title="添加"

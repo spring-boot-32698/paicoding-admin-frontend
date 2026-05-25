@@ -15,8 +15,58 @@
 	align-items: center;
 }
 
-.group-tree .ant-tree-node-content-wrapper span {
-	margin-right: 8px;
+.group-tree .ant-tree-title {
+	width: 100%;
+	min-width: 0;
+}
+
+.tree-node-row {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	width: 100%;
+	min-width: 0;
+	gap: 16px;
+}
+
+.tree-node-title {
+	display: inline-flex;
+	align-items: center;
+	min-width: 0;
+	gap: 8px;
+}
+
+.tree-node-id {
+	flex: 0 0 auto;
+	color: gray;
+	font-size: 0.6rem;
+	font-style: italic;
+}
+
+.tree-node-name {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.tree-node-slug {
+	flex: 0 0 auto;
+	max-width: 220px;
+	overflow: hidden;
+	color: #8c8c8c;
+	font-size: 12px;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.tree-node-tag {
+	flex: 0 0 auto;
+	margin-inline-end: 0;
+}
+
+.tree-node-actions {
+	flex: 0 0 auto;
+	margin-left: auto;
 }
 
 // 分组节点样式
@@ -35,9 +85,29 @@
 // 分组节点按钮容器
 .group-node-buttons {
 	display: flex;
-	gap: 4px;
+	align-items: center;
+	gap: 8px;
 	opacity: 0;
 	transition: opacity 0.2s;
+}
+
+.group-node-buttons .ant-btn {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 32px;
+	height: 32px;
+	padding: 0;
+	line-height: 1;
+	border-radius: 6px;
+}
+
+.group-node-buttons .ant-btn .anticon {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	margin-right: 0;
+	line-height: 1;
 }
 
 // 鼠标悬停时显示按钮

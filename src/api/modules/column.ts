@@ -14,6 +14,11 @@ export const getColumnListApi = (data: { pageNumber: number; pageSize: number })
 	return http.post(`${PORT1}/column/list`, data);
 };
 
+// 获取教程详情
+export const getColumnDetailApi = (columnId: number) => {
+	return http.get(`${PORT1}/column/detail`, { columnId });
+};
+
 // 添加返回类型
 export const getColumnByNameListApi = (key: string) => {
 	return http.get(`${PORT1}/column/query`, { key });
@@ -62,6 +67,11 @@ export const deleteGroupApi = (groupId: number) => {
 // 保存操作
 export const updateColumnArticleApi = (form: IFormType) => {
 	return http.post<Login.ResAuthButtons>(`${PORT1}/column/saveColumnArticle`, form);
+};
+
+// 设置教程说明页文章
+export const setColumnReadmeArticleApi = (data: { columnId: number; articleId: number }) => {
+	return http.post<Login.ResAuthButtons>(`${PORT1}/column/setReadmeArticle`, data);
 };
 
 // 删除教程操作

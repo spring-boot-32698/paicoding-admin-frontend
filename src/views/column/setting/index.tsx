@@ -44,6 +44,8 @@ interface DataType {
 	author: number;
 	columnId: number;
 	column: string; // 教程名
+	urlSlug: string;
+	readmeArticleId: number;
 	state: number;
 	freeEndTime: number;
 	freeStartTime: number;
@@ -57,6 +59,8 @@ interface IProps {}
 export interface IFormType {
 	columnId: number; // 为0时，是保存，非0是更新
 	column: string; // 教程名
+	urlSlug: string; // 教程 URL 标识
+	readmeArticleId: number; // 教程说明页文章ID
 	author: number; // 作者ID
 	introduction: string; // 简介
 	cover: string; // 封面 URL
@@ -73,6 +77,8 @@ export interface IFormType {
 const defaultInitForm: IFormType = {
 	columnId: -1,
 	column: "",
+	urlSlug: "",
+	readmeArticleId: 0,
 	author: -1,
 	introduction: "",
 	cover: "",
@@ -96,6 +102,16 @@ const defaultSearchForm = {
 	column: ""
 };
 
+const normalizeUrlSlug = (value?: string) =>
+	String(value || "")
+		.trim()
+		.toLowerCase();
+
+const isValidUrlSlug = (value?: string) => {
+	const urlSlug = normalizeUrlSlug(value);
+	return !urlSlug || (/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(urlSlug) && !/^\d+$/.test(urlSlug));
+};
+
 const Column: FC<IProps> = props => {
 	const dateFormat = "YYYY/MM/DD";
 	// @ts-ignore
@@ -107,6 +123,8 @@ const Column: FC<IProps> = props => {
 	const {
 		columnId,
 		column,
+		urlSlug,
+		readmeArticleId,
 		introduction,
 		cover,
 		authorAvatar,
@@ -121,6 +139,8 @@ const Column: FC<IProps> = props => {
 
 	const detailInfo = [
 		{ label: "教程名", title: column },
+		{ label: "专栏URL", title: urlSlug },
+		{ label: "说明页文章", title: readmeArticleId > 0 ? readmeArticleId : "-" },
 		{ label: "简介", title: introduction },
 		{ label: "连载数量", title: nums },
 		{ label: "类型", title: ColumnType[type] },
@@ -281,9 +301,9 @@ const Column: FC<IProps> = props => {
 		});
 	};
 
-	const handleManage = (columnId: number, column: string) => {
+	const handleManage = (columnId: number, column: string, readmeArticleId: number, urlSlug: string) => {
 		// 导航到文章排序页面
-		navigate("/column/setting/index/groups", { state: { columnId, column } });
+		navigate("/column/setting/index/groups", { state: { columnId, column, readmeArticleId, urlSlug } });
 	};
 
 	// 编辑或者新增时提交数据到服务器端
@@ -296,10 +316,12 @@ const Column: FC<IProps> = props => {
 		// 从formRef中获取数据，用户填上去可以直接提交的数据
 		const values = await formRef.validateFields();
 		console.log("handleSubmit 时看看form的值 values", values);
+		const urlSlug = normalizeUrlSlug(values.urlSlug);
 
 		// 新的值传递到后端
 		const newValues = {
 			...values,
+			urlSlug,
 			author: author,
 			columnId: status === UpdateEnum.Save ? UpdateEnum.Save : columnId,
 			freeStartTime: freeStartTime,
@@ -360,8 +382,12 @@ const Column: FC<IProps> = props => {
 			dataIndex: "column",
 			key: "column",
 			render(value, item) {
+				const href =
+					item?.readmeArticleId > 0 && item?.urlSlug
+						? `${baseDomain}/${item.urlSlug}/readme`
+						: `${baseDomain}/column/${item?.urlSlug || item?.columnId}`;
 				return (
-					<a href={`${baseDomain}/column/${item?.columnId}/1`} className="cell-text" target="_blank" rel="noreferrer">
+					<a href={href} className="cell-text" target="_blank" rel="noreferrer">
 						{value}
 					</a>
 				);
@@ -414,7 +440,7 @@ const Column: FC<IProps> = props => {
 			key: "key",
 			width: 200,
 			render: (_, item) => {
-				const { columnId, column, type, state, cover, freeStartTime, freeEndTime } = item;
+				const { columnId, column, readmeArticleId, urlSlug, type, state, cover, freeStartTime, freeEndTime } = item;
 
 				return (
 					<div className="operation-btn">
@@ -437,7 +463,7 @@ const Column: FC<IProps> = props => {
 								icon={<SwapOutlined />}
 								style={{ marginRight: "10px" }}
 								onClick={() => {
-									handleManage(columnId, column);
+									handleManage(columnId, column, readmeArticleId, urlSlug);
 								}}
 							></Button>
 						</Tooltip>
@@ -494,6 +520,29 @@ const Column: FC<IProps> = props => {
 					allowClear
 					onChange={e => {
 						handleChange({ column: e.target.value });
+					}}
+				/>
+			</Form.Item>
+			<Form.Item
+				label="专栏 URL"
+				name="urlSlug"
+				tooltip="保存后可通过 https://xxx/{专栏URL}/readme 或 /column/{专栏URL} 访问"
+				rules={[
+					{
+						validator: (_, value) =>
+							isValidUrlSlug(value)
+								? Promise.resolve()
+								: Promise.reject(new Error("只能包含小写字母、数字和连字符，且不能是纯数字"))
+					}
+				]}
+			>
+				<Input
+					allowClear
+					placeholder="例如 paiagent，留空则自动生成"
+					onChange={e => {
+						const urlSlug = normalizeUrlSlug(e.target.value);
+						formRef.setFieldsValue({ urlSlug });
+						handleChange({ urlSlug });
 					}}
 				/>
 			</Form.Item>

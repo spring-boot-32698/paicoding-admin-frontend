@@ -52,9 +52,19 @@ export const generateArticleAiApi = (params: { shortTitle: string; content: stri
 };
 
 // 生成语义 URL
-export const generateArticleSlugApi = (params: { title?: string; shortTitle?: string }) => {
+export const generateArticleSlugApi = (params: {
+	title?: string;
+	shortTitle?: string;
+	articleId?: number | string;
+	columnUrlSlug?: string;
+}) => {
 	return http.post<Login.ResAuthButtons>(`${PORT1}/article/generate/slug`, params, {
 		headers: { noLoading: true },
 		timeout: 15000
 	});
+};
+
+// 更新语义 URL
+export const updateArticleSlugApi = (params: { articleId: number | string; columnId?: number; urlSlug: string }) => {
+	return http.post<Login.ResAuthButtons>(`${PORT1}/article/update/slug`, params);
 };
