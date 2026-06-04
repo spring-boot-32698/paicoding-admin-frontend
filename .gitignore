@@ -29,3 +29,4 @@ stats.html
 .vscode/settings.json
 dist.zip
 .env.deploy
+.env

@@ -8,16 +8,36 @@ import { ContentInterWrap } from "@/components/common-wrap";
 
 import "./index.scss";
 
+type SelectOption = { label: string; value: number | string };
+
 interface IProps {
+	searchForm: ISearchForm;
 	handleSearchChange: (e: object) => void;
 	handleSearch: () => void;
-	PushStatusList: Array<{ label: string; value: number }>;
-	ToppingStatusList: Array<{ label: string; value: number }>;
-	OfficalStatusList: Array<{ label: string; value: number }>;
-	ColumnList: Array<{ label: string; value: number }>;
+	PushStatusList: SelectOption[];
+	ToppingStatusList: SelectOption[];
+	OfficalStatusList: SelectOption[];
+	ColumnList: SelectOption[];
 }
 
-const Search: FC<IProps> = ({ handleSearchChange, handleSearch, PushStatusList, ToppingStatusList, OfficalStatusList, ColumnList }) => {
+interface ISearchForm {
+	userName: string;
+	title: string;
+	keyword: string;
+	status: number;
+	toppingStat: number;
+	officalStat: number;
+	columnId: number;
+}
+
+const normalizeSelectValue = (value: number, stringify = false) => {
+	if (value === -1) return undefined;
+	return stringify ? String(value) : value;
+};
+
+const normalizeSearchValue = (value: number | string | undefined) => (value === undefined ? -1 : Number(value));
+
+const Search: FC<IProps> = ({ searchForm, handleSearchChange, handleSearch, PushStatusList, ToppingStatusList, OfficalStatusList, ColumnList }) => {
 	const navigate = useNavigate();
 	return (
 		<div className="article-search">
@@ -29,6 +49,7 @@ const Search: FC<IProps> = ({ handleSearchChange, handleSearch, PushStatusList, 
 							allowClear
 							placeholder="搜索标题/摘要/正文"
 							style={{ width: 220 }}
+							value={searchForm.keyword}
 							onChange={e => handleSearchChange({ keyword: e.target.value })}
 						/>
 					</div>
@@ -38,6 +59,7 @@ const Search: FC<IProps> = ({ handleSearchChange, handleSearch, PushStatusList, 
 							allowClear
 							placeholder="请输入作者名"
 							style={{ width: 142 }}
+							value={searchForm.userName}
 							onChange={e => {
 								handleSearchChange({ userName: e.target.value });
 							}}
@@ -48,6 +70,7 @@ const Search: FC<IProps> = ({ handleSearchChange, handleSearch, PushStatusList, 
 							allowClear
 							placeholder="请输入标题"
 							style={{ width: 142 }}
+							value={searchForm.title}
 							onChange={e => handleSearchChange({ title: e.target.value })}
 						/>
 					</div>
@@ -58,9 +81,10 @@ const Search: FC<IProps> = ({ handleSearchChange, handleSearch, PushStatusList, 
 							// 默认值
 							placeholder="选择专栏"
 							options={ColumnList}
-							style={{ width: 142 }}
+							style={{ width: 180 }}
+							value={normalizeSelectValue(searchForm.columnId)}
 							// 触发搜索
-							onChange={value => handleSearchChange({ columnId: Number(value || -1) })}
+							onChange={value => handleSearchChange({ columnId: normalizeSearchValue(value) })}
 						></Select>
 					</div>
 					<div className="article-search__search-item">
@@ -71,8 +95,9 @@ const Search: FC<IProps> = ({ handleSearchChange, handleSearch, PushStatusList, 
 							placeholder="选择状态"
 							options={PushStatusList}
 							style={{ width: 100 }}
+							value={normalizeSelectValue(searchForm.status, true)}
 							// 触发搜索
-							onChange={value => handleSearchChange({ status: Number(value || -1) })}
+							onChange={value => handleSearchChange({ status: normalizeSearchValue(value) })}
 						></Select>
 					</div>
 					<div className="article-search__search-item">
@@ -83,8 +108,9 @@ const Search: FC<IProps> = ({ handleSearchChange, handleSearch, PushStatusList, 
 							placeholder="是否置顶"
 							options={ToppingStatusList}
 							style={{ width: 100 }}
+							value={normalizeSelectValue(searchForm.toppingStat, true)}
 							// 触发搜索
-							onChange={value => handleSearchChange({ toppingStat: Number(value || -1) })}
+							onChange={value => handleSearchChange({ toppingStat: normalizeSearchValue(value) })}
 						></Select>
 					</div>
 					<div className="article-search__search-item">
@@ -95,8 +121,9 @@ const Search: FC<IProps> = ({ handleSearchChange, handleSearch, PushStatusList, 
 							placeholder="是否推荐"
 							options={OfficalStatusList}
 							style={{ width: 100 }}
+							value={normalizeSelectValue(searchForm.officalStat, true)}
 							// 触发搜索
-							onChange={value => handleSearchChange({ officalStat: Number(value || -1) })}
+							onChange={value => handleSearchChange({ officalStat: normalizeSearchValue(value) })}
 						></Select>
 					</div>
 					<div className="article-search__search-btn">

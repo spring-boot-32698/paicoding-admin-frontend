@@ -1,15 +1,15 @@
 /* eslint-disable prettier/prettier */
 import { FC, useCallback, useEffect, useState } from "react";
+import Highlighter from "react-highlight-words";
 import { connect } from "react-redux";
 import { useNavigate } from "react-router";
 import { DeleteOutlined, EditOutlined, HighlightOutlined } from "@ant-design/icons";
 import { Avatar, Button, Form, Input, message, Modal, Popover, Select, Space, Switch, Table, Tooltip } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import dayjs from "dayjs";
-import Highlighter from "react-highlight-words";
 
 import { delArticleApi, generateArticleSlugApi, getArticleListApi, operateArticleApi, updateArticleApi } from "@/api/modules/article";
-import { getColumnListApi } from "@/api/modules/column";
+import { getColumnDetailApi, getColumnListApi } from "@/api/modules/column";
 import { ContentInterWrap, ContentWrap } from "@/components/common-wrap";
 import { initPagination, IPagination, UpdateEnum } from "@/enums/common";
 import { MapItem } from "@/typings/common";
@@ -83,13 +83,62 @@ const defaultSearchForm = {
 	columnId: -1
 };
 
+const ARTICLE_LIST_CACHE_KEY = "paicoding-admin:article-list:query";
+
+interface ArticleListCache {
+	searchForm?: Partial<ISearchForm>;
+	pagination?: Partial<IPagination>;
+}
+
+const normalizeCacheNumber = (value: unknown, defaultValue = -1) => {
+	if (value === undefined || value === null || value === "") return defaultValue;
+	const num = Number(value);
+	return Number.isFinite(num) ? num : defaultValue;
+};
+
+const normalizeSearchFormCache = (searchForm?: Partial<ISearchForm>): Partial<ISearchForm> => {
+	if (!searchForm) return {};
+	return {
+		...searchForm,
+		status: normalizeCacheNumber(searchForm.status),
+		toppingStat: normalizeCacheNumber(searchForm.toppingStat),
+		officalStat: normalizeCacheNumber(searchForm.officalStat),
+		columnId: normalizeCacheNumber(searchForm.columnId)
+	};
+};
+
+const readArticleListCache = (): ArticleListCache => {
+	try {
+		const cache = window.sessionStorage.getItem(ARTICLE_LIST_CACHE_KEY);
+		const parsedCache = cache ? JSON.parse(cache) : {};
+		return {
+			...parsedCache,
+			searchForm: normalizeSearchFormCache(parsedCache.searchForm)
+		};
+	} catch (error) {
+		console.warn("读取文章列表查询缓存失败", error);
+		return {};
+	}
+};
+
+const writeArticleListCache = (cache: ArticleListCache) => {
+	try {
+		window.sessionStorage.setItem(ARTICLE_LIST_CACHE_KEY, JSON.stringify(cache));
+	} catch (error) {
+		console.warn("保存文章列表查询缓存失败", error);
+	}
+};
+
 const Article: FC<IProps> = props => {
 	const [formRef] = Form.useForm();
 	// 编辑表单
 	const [form, setForm] = useState<IInitForm>(defaultInitForm);
 	const [slugGenerating, setSlugGenerating] = useState<boolean>(false);
 	// 查询表单
-	const [searchForm, setSearchForm] = useState<ISearchForm>(defaultSearchForm);
+	const [searchForm, setSearchForm] = useState<ISearchForm>(() => ({
+		...defaultSearchForm,
+		...readArticleListCache().searchForm
+	}));
 	// 弹窗
 	const [isModalOpen, setIsModalOpen] = useState<boolean>(false);
 	// 列表数据
@@ -103,7 +152,10 @@ const Article: FC<IProps> = props => {
 	const [query, setQuery] = useState<number>(0);
 
 	// 分页
-	const [pagination, setPagination] = useState<IPagination>(initPagination);
+	const [pagination, setPagination] = useState<IPagination>(() => ({
+		...initPagination,
+		...readArticleListCache().pagination
+	}));
 	const { current, pageSize } = pagination;
 
 	const paginationInfo = {
@@ -139,8 +191,7 @@ const Article: FC<IProps> = props => {
 	// 查询表单值改变
 	const handleSearchChange = (item: MapItem) => {
 		// 当 status 的值为 -1 时，重新显示
-		setSearchForm({ ...searchForm, ...item });
-		console.log("查询条件变化了",searchForm);
+		setSearchForm(prev => ({ ...prev, ...item }));
 	};
 
 	// 当点击查询按钮的时候触发
@@ -355,14 +406,28 @@ const Article: FC<IProps> = props => {
 			const { code } = status || {};
 			//@ts-ignore
 			const { list, pageNum, pageSize: resPageSize, total } = result || {};
-			setPagination({ current: Number(pageNum), pageSize: resPageSize, total });
 			if (code === 0) {
+				setPagination({
+					current: normalizeCacheNumber(pageNum, current),
+					pageSize: normalizeCacheNumber(resPageSize, pageSize),
+					total
+				});
 				const newList = list.map((item: MapItem) => ({ ...item, key: item?.articleId }));
 				setTableData(newList);
 			}
 		};
 		getSortList();
 	}, [query, current, pageSize]);
+
+	useEffect(() => {
+		writeArticleListCache({
+			searchForm,
+			pagination: {
+				current,
+				pageSize
+			}
+		});
+	}, [searchForm, current, pageSize]);
 
 	// 获取专栏列表
 	useEffect(() => {
@@ -375,10 +440,23 @@ const Article: FC<IProps> = props => {
 			if (code === 0) {
 				//@ts-ignore
 				const { list } = result || {};
-				const newList = list.map((item: any) => ({
+				let newList = list.map((item: any) => ({
 					label: item.column,
-					value: item.columnId
+					value: Number(item.columnId)
 				}));
+				if (searchForm.columnId !== -1 && !newList.some((item: any) => item.value === searchForm.columnId)) {
+					const { status: detailStatus, result: detail } = await getColumnDetailApi(searchForm.columnId);
+					if (detailStatus?.code === 0 && detail) {
+						const detailInfo = detail as any;
+						newList = [
+							...newList,
+							{
+								label: detailInfo.column,
+								value: Number(detailInfo.columnId ?? searchForm.columnId)
+							}
+						];
+					}
+				}
 				setColumnList(newList);
 			}
 		};
@@ -677,6 +755,7 @@ const Article: FC<IProps> = props => {
 			<ContentWrap>
 				{/* 搜索 */}
 				<Search
+					searchForm={searchForm}
 					handleSearchChange={handleSearchChange}
 					handleSearch={handleSearch}
 					PushStatusList={PushStatusList}

@@ -1,5 +1,5 @@
 /* eslint-disable prettier/prettier */
-import { FC, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { FC, MouseEvent as ReactMouseEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import Moveable, { OnResize, OnResizeEnd } from "react-moveable";
 import { connect } from "react-redux";
@@ -350,6 +350,11 @@ interface ImageInfo {
 	index: number; // 图片在文本中的位置
 }
 
+interface ImportedMarkdownSource {
+	fileName: string;
+	fileHandle?: any;
+}
+
 export interface IFormType {
 	articleId: number; // 文章id
 	status: number; // 文章状态
@@ -404,6 +409,7 @@ const ArticleEdit: FC<IProps> = props => {
 	const [container, setContainer] = useState<HTMLElement | null>(null);
 	const moveableRef = useRef<Moveable>(null);
 	const editorRef = useRef<any>(null);
+	const editorRootRef = useRef<HTMLDivElement | null>(null);
 
 	// 缓存待提交的图片尺寸变更：Map<fullUrl, {width, height} | 'reset'>
 	const imageSizeMapRef = useRef<Map<string, { width: number; height: number } | "reset">>(new Map());
@@ -442,6 +448,75 @@ const ArticleEdit: FC<IProps> = props => {
 
 	const getImageSizeMap = useCallback(() => imageSizeMapRef.current, []);
 
+	const collapseEditorSelection = useCallback(() => {
+		const editor = editorRef.current;
+		if (!editor?.listSelections || !editor?.setCursor) return;
+
+		const selections = editor.listSelections();
+		if (!editor.somethingSelected?.() && selections.length <= 1) return;
+
+		const primarySelection = selections[selections.length - 1];
+		const cursor = primarySelection?.head || primarySelection?.to?.() || editor.getCursor?.("head") || editor.getCursor?.();
+		if (!cursor) return;
+
+		const collapse = () => editor.setCursor(cursor);
+		if (editor.operation) {
+			editor.operation(collapse);
+		} else {
+			collapse();
+		}
+	}, []);
+
+	const clearBrowserSelection = useCallback(() => {
+		const selection = window.getSelection?.();
+		if (selection && !selection.isCollapsed) {
+			selection.removeAllRanges();
+		}
+	}, []);
+
+	const handleEditorMouseDownCapture = useCallback(
+		(event: ReactMouseEvent<HTMLDivElement>) => {
+			const targetElement = event.target instanceof HTMLElement ? event.target : null;
+			if (!targetElement || targetElement.closest(".bytemd-toolbar")) return;
+
+			clearBrowserSelection();
+
+			if (!targetElement.closest(".CodeMirror")) {
+				collapseEditorSelection();
+				return;
+			}
+
+			if (!event.shiftKey && !event.metaKey && !event.ctrlKey && !event.altKey) {
+				collapseEditorSelection();
+			}
+		},
+		[clearBrowserSelection, collapseEditorSelection]
+	);
+
+	useEffect(() => {
+		const handleDocumentMouseDown = (event: MouseEvent) => {
+			const editorRoot = editorRootRef.current;
+			if (editorRoot && event.target instanceof Node && editorRoot.contains(event.target)) return;
+
+			clearBrowserSelection();
+			collapseEditorSelection();
+		};
+
+		document.addEventListener("mousedown", handleDocumentMouseDown, true);
+		return () => {
+			document.removeEventListener("mousedown", handleDocumentMouseDown, true);
+		};
+	}, [clearBrowserSelection, collapseEditorSelection]);
+
+	const editorConfig = useMemo(
+		() => ({
+			configureMouse: () => ({
+				addNew: false
+			})
+		}),
+		[]
+	);
+
 	const resolveUrl = useCallback((urlStr: string) => {
 		if (!urlStr) return "";
 		try {
@@ -477,6 +552,13 @@ const ArticleEdit: FC<IProps> = props => {
 	// 文章内容
 	const [content, setContent] = useState<string>("");
 	const contentRef = useRef<string>("");
+	const hasDraftChangesRef = useRef<boolean>(false);
+	const isSavingArticleRef = useRef<boolean>(false);
+	const draftBaselineSignatureRef = useRef<string>("");
+	const suppressEditorChangeValueRef = useRef<string | null>(null);
+	const importedMarkdownSourceRef = useRef<ImportedMarkdownSource | null>(null);
+	const [importedMarkdownFileName, setImportedMarkdownFileName] = useState<string>("");
+	const [canOverwriteMarkdown, setCanOverwriteMarkdown] = useState<boolean>(false);
 
 	// 抽屉
 	const [isOpenDrawerShow, setIsOpenDrawerShow] = useState<boolean>(false);
@@ -504,11 +586,51 @@ const ArticleEdit: FC<IProps> = props => {
 		return articleId ? `ARTICLE_DRAFT_${articleId}` : "ARTICLE_DRAFT_NEW";
 	}, [articleId]);
 
+	const buildDraftSignature = (data: MapItem) => {
+		const normalize = (value: any): any => {
+			if (value == null) return "";
+			if (Array.isArray(value)) {
+				return value.map(item => normalize(item));
+			}
+			if (typeof value === "object") {
+				return Object.keys(value)
+					.sort()
+					.reduce((result: MapItem, key) => {
+						result[key] = normalize(value[key]);
+						return result;
+					}, {});
+			}
+			return String(value);
+		};
+
+		const draftFields = {
+			content: data.content,
+			title: data.title,
+			shortTitle: data.shortTitle,
+			summary: data.summary,
+			urlSlug: data.urlSlug,
+			cover: data.cover,
+			status: data.status,
+			readType: data.readType,
+			payWay: data.payWay,
+			payAmount: data.payAmount,
+			categoryId: data.categoryId,
+			tagIds: data.tagIds,
+			tagName: data.tagName
+		};
+
+		return JSON.stringify(normalize(draftFields));
+	};
+
+	const hasMeaningfulDraftData = (data: MapItem) => {
+		return Boolean(data.content || data.title || data.shortTitle || data.summary || data.cover || data.urlSlug);
+	};
+
 	// 自动保存函数 (10s 节流)
 	const autoSave = useRef(
 		throttle(
-			data => {
-				localSet(draftKey, { ...data, timestamp: Date.now() });
+			(key: string, data: MapItem) => {
+				localSet(key, { ...data, timestamp: Date.now() });
 				console.log("自动保存草稿成功", new Date().toLocaleTimeString());
 			},
 			10000,
@@ -518,15 +640,44 @@ const ArticleEdit: FC<IProps> = props => {
 
 	// 监听变化并触发自动保存
 	useEffect(() => {
-		if (content || form.title) {
-			const currentFormValues = formRef.getFieldsValue();
-			autoSave.current({
-				...form,
-				...currentFormValues,
-				content
-			});
+		if (isSavingArticleRef.current) return;
+
+		const currentFormValues = formRef.getFieldsValue();
+		const draftData = {
+			...form,
+			...currentFormValues,
+			content
+		};
+
+		if (!hasMeaningfulDraftData(draftData)) {
+			hasDraftChangesRef.current = false;
+			autoSave.current.cancel();
+			localRemove(draftKey);
+			return;
 		}
-	}, [content, form, formRef]);
+
+		const currentSignature = buildDraftSignature(draftData);
+		const hasUnsavedChanges = currentSignature !== draftBaselineSignatureRef.current;
+		hasDraftChangesRef.current = hasUnsavedChanges;
+
+		if (!hasUnsavedChanges) {
+			autoSave.current.cancel();
+			localRemove(draftKey);
+			return;
+		}
+
+		autoSave.current(draftKey, draftData);
+	}, [content, form, formRef, draftKey]);
+
+	useEffect(() => {
+		return () => {
+			if (hasDraftChangesRef.current && !isSavingArticleRef.current) {
+				autoSave.current.flush();
+			} else {
+				autoSave.current.cancel();
+			}
+		};
+	}, []);
 
 	// 新建文章时检查草稿
 	useEffect(() => {
@@ -541,6 +692,7 @@ const ArticleEdit: FC<IProps> = props => {
 				okText: "恢复",
 				cancelText: "丢弃",
 				onOk: () => {
+					hasDraftChangesRef.current = true;
 					setContent(draft.content);
 					setForm(prev => ({ ...prev, ...draft }));
 					formRef.setFieldsValue(draft);
@@ -559,6 +711,7 @@ const ArticleEdit: FC<IProps> = props => {
 					message.success("已恢复草稿");
 				},
 				onCancel: () => {
+					hasDraftChangesRef.current = false;
 					localRemove(draftKey);
 				}
 			});
@@ -572,7 +725,10 @@ const ArticleEdit: FC<IProps> = props => {
 		setQuery(prev => prev + 1);
 	}, []);
 
-	const handleChange = (item: MapItem) => {
+	const handleChange = (item: MapItem, markDraftChanged = true) => {
+		if (markDraftChanged) {
+			hasDraftChangesRef.current = true;
+		}
 		// 使用函数式更新，避免多次连续调用时的状态覆盖问题
 		setForm(prev => ({ ...prev, ...item }));
 	};
@@ -581,9 +737,24 @@ const ArticleEdit: FC<IProps> = props => {
 		contentRef.current = content;
 	}, [content]);
 
+	const setServerContent = (value?: string) => {
+		const nextContent = value || "";
+		suppressEditorChangeValueRef.current = nextContent;
+		setContent(nextContent);
+	};
+
 	const handleFormRefChange = (item: MapItem) => {
 		// 当自定义组件更新时，对 formRef 也进行更新
 		formRef.setFieldsValue({ ...item });
+		handleChange(item);
+	};
+
+	const isDraftSameAsServerArticle = (draft: MapItem, article: MapItem) => {
+		const normalize = (value: any) => (value == null ? "" : String(value));
+		if (normalize(draft?.content) !== normalize(article?.content)) return false;
+		return ["title", "shortTitle", "summary", "urlSlug"].every(
+			key => !Object.prototype.hasOwnProperty.call(draft || {}, key) || normalize(draft?.[key]) === normalize(article?.[key])
+		);
 	};
 
 	const normalizeUrlSlug = (value?: string) => (value || "").trim().toLowerCase();
@@ -970,67 +1141,67 @@ const ArticleEdit: FC<IProps> = props => {
 		setCoverList([]);
 	};
 
+	const applyPendingImageSizeChanges = (currentContent: string) => {
+		const sizeMap = imageSizeMapRef.current;
+		if (sizeMap.size === 0) {
+			return currentContent;
+		}
+
+		let newContent = currentContent;
+		const resolveImageUrl = (urlStr: string) => {
+			if (!urlStr) return "";
+			try {
+				const cleanUrl = urlStr.split(/\s+/)[0];
+				return new URL(decodeURIComponent(cleanUrl), window.location.origin).href;
+			} catch (e) {
+				return urlStr;
+			}
+		};
+
+		const mdImgRegex = /!\[(.*?)\]\((.*?)\)/g;
+		const htmlImgRegex = /<img\s+[^>]*src=["'](.*?)["'][^>]*>/g;
+
+		newContent = newContent.replace(mdImgRegex, (match, alt, src) => {
+			const fullUrl = resolveImageUrl(src);
+			const state = sizeMap.get(fullUrl);
+			if (state && typeof state === "object") {
+				return `<img src="${src.split(/\s+/)[0]}" alt="${alt}" width="${state.width}" height="${state.height}" />`;
+			}
+			return match;
+		});
+
+		newContent = newContent.replace(htmlImgRegex, (match, src) => {
+			const fullUrl = resolveImageUrl(src);
+			const state = sizeMap.get(fullUrl);
+			const altMatch = match.match(/alt=["'](.*?)["']/);
+			const currentAlt = altMatch ? altMatch[1] : "";
+
+			if (state === "reset") {
+				return `![${currentAlt}](${src})`;
+			} else if (state && typeof state === "object") {
+				return `<img src="${src}" alt="${currentAlt}" width="${state.width}" height="${state.height}" />`;
+			}
+			return match;
+		});
+
+		if (newContent !== currentContent) {
+			if (container) {
+				scrollPosRef.current = container.scrollTop;
+				isUpdatingContentRef.current = true;
+			}
+
+			setContent(newContent);
+			handleChange({ content: newContent });
+			sizeMap.clear();
+		}
+
+		return newContent;
+	};
+
 	// 保存或者更新
 	const handleSaveOrUpdate = async () => {
 		// 1. 将缓存的图片尺寸变更批量应用到 Markdown 内容中
-		const sizeMap = imageSizeMapRef.current;
-		if (sizeMap.size > 0) {
-			let newContent = content;
-			const resolveUrl = (urlStr: string) => {
-				if (!urlStr) return "";
-				try {
-					const cleanUrl = urlStr.split(/\s+/)[0];
-					return new URL(decodeURIComponent(cleanUrl), window.location.origin).href;
-				} catch (e) {
-					return urlStr;
-				}
-			};
-
-			// 匹配所有图片
-			const mdImgRegex = /!\[(.*?)\]\((.*?)\)/g;
-			const htmlImgRegex = /<img\s+[^>]*src=["'](.*?)["'][^>]*>/g;
-
-			// 使用简单的 replace 回调处理批量更新
-			newContent = newContent.replace(mdImgRegex, (match, alt, src) => {
-				const fullUrl = resolveUrl(src);
-				const state = sizeMap.get(fullUrl);
-				if (state && typeof state === "object") {
-					return `<img src="${src.split(/\s+/)[0]}" alt="${alt}" width="${state.width}" height="${state.height}" />`;
-				}
-				return match;
-			});
-
-			newContent = newContent.replace(htmlImgRegex, (match, src) => {
-				const fullUrl = resolveUrl(src);
-				const state = sizeMap.get(fullUrl);
-
-				// 提取原标签中的 alt 属性
-				const altMatch = match.match(/alt=["'](.*?)["']/);
-				const currentAlt = altMatch ? altMatch[1] : "";
-
-				if (state === "reset") {
-					// 还原为 Markdown 语法，保留提取到的 alt
-					return `![${currentAlt}](${src})`;
-				} else if (state && typeof state === "object") {
-					// 替换或添加 width/height 属性，同时保留 alt
-					return `<img src="${src}" alt="${currentAlt}" width="${state.width}" height="${state.height}" />`;
-				}
-				return match;
-			});
-
-			if (newContent !== content) {
-				// 记录滚动位置，防止批量更新时跳动
-				if (container) {
-					scrollPosRef.current = container.scrollTop;
-					isUpdatingContentRef.current = true;
-				}
-
-				setContent(newContent);
-				handleChange({ content: newContent });
-				// 清空缓存
-				sizeMap.clear();
-			}
-		}
+		applyPendingImageSizeChanges(content);
 
 		// 2. 弹出抽屉
 		setIsOpenDrawerShow(true);
@@ -1151,20 +1322,20 @@ const ArticleEdit: FC<IProps> = props => {
 	};
 
 	const handleReplaceImgUrl = async () => {
-		const { content } = form;
+		const currentContent = contentRef.current || form.content || "";
 
 		// 检查是否有外链图片或失败的图片需要转换
-		const hasExternalImages = /!\[.*?\]\(https?:\/\/.*?\)/.test(content);
+		const hasExternalImages = /!\[.*?\]\(https?:\/\/.*?\)/.test(currentContent);
 		if (!hasExternalImages) {
 			message.info("当前内容中没有外链图片需要转换");
 			return;
 		}
 
-		const result = await uploadImages(content);
+		const result = await uploadImages(currentContent);
 		const { newContent, successCount, failedCount, skippedCount } = result;
 
 		// 更新内容
-		if (newContent !== content) {
+		if (newContent !== currentContent) {
 			setContent(newContent);
 			handleChange({ content: newContent });
 		}
@@ -1260,6 +1431,109 @@ const ArticleEdit: FC<IProps> = props => {
 		return text.trim();
 	};
 
+	const normalizeMarkdownLineEndings = (raw: string) => {
+		return (raw || "").replace(/^\uFEFF/, "").replace(/\r\n?/g, "\n");
+	};
+
+	const buildImportedMarkdownSource = (fileName: string, fileHandle?: any): ImportedMarkdownSource => {
+		return {
+			fileName,
+			fileHandle
+		};
+	};
+
+	const getMarkdownBodyStartIndex = (raw: string) => {
+		let bodyStartIndex = 0;
+		const fmMatch = raw.match(/^---[ \t]*\r?\n[\s\S]*?\r?\n[ \t]*---[ \t]*(?:\r?\n|$)/);
+		if (fmMatch) {
+			bodyStartIndex = fmMatch[0].length;
+		}
+
+		const contentAfterFrontMatter = raw.slice(bodyStartIndex);
+		const h1Match = contentAfterFrontMatter.match(/^[ \t]*#[ \t]+.+[ \t]*(?:\r?\n|$)/m);
+		if (h1Match?.index !== undefined) {
+			bodyStartIndex += h1Match.index + h1Match[0].length;
+		}
+
+		return bodyStartIndex;
+	};
+
+	const buildMarkdownSourceContent = (currentFileContent: string, body: string) => {
+		const bodyStartIndex = getMarkdownBodyStartIndex(currentFileContent);
+		const prefix = currentFileContent.slice(0, bodyStartIndex);
+		const lineEnding = currentFileContent.includes("\r\n") ? "\r\n" : "\n";
+		const normalizedBody = (body || "").trim();
+
+		if (!prefix) {
+			return `${normalizedBody}${lineEnding}`;
+		}
+
+		const separator = /\r?\n$/.test(prefix) ? "" : lineEnding;
+		return `${prefix}${separator}${normalizedBody}${lineEnding}`;
+	};
+
+	const pickMarkdownFile = async (): Promise<{ file: File; fileHandle?: any } | null> => {
+		const showOpenFilePicker = (window as any).showOpenFilePicker;
+
+		if (typeof showOpenFilePicker === "function") {
+			try {
+				const [fileHandle] = await showOpenFilePicker({
+					multiple: false,
+					types: [
+						{
+							description: "Markdown",
+							accept: {
+								"text/markdown": [".md", ".markdown"],
+								"text/plain": [".txt"]
+							}
+						}
+					]
+				});
+				if (!fileHandle) return null;
+				return {
+					file: await fileHandle.getFile(),
+					fileHandle
+				};
+			} catch (error: any) {
+				if (error?.name === "AbortError") return null;
+				console.warn("File System Access API 不可用，回退到普通文件导入:", error);
+			}
+		}
+
+		return new Promise(resolve => {
+			const input = document.createElement("input");
+			input.type = "file";
+			input.accept = ".md,.markdown,.txt,text/markdown,text/plain";
+			input.style.display = "none";
+
+			input.onchange = (e: Event) => {
+				const target = e.target as HTMLInputElement;
+				const file = target.files?.[0];
+				if (document.body.contains(input)) {
+					document.body.removeChild(input);
+				}
+				resolve(file ? { file } : null);
+			};
+
+			document.body.appendChild(input);
+			input.click();
+		});
+	};
+
+	const ensureMarkdownWritePermission = async (fileHandle: any) => {
+		if (!fileHandle) return false;
+		const permissionOptions = { mode: "readwrite" };
+		if (typeof fileHandle.queryPermission === "function") {
+			const currentPermission = await fileHandle.queryPermission(permissionOptions);
+			if (currentPermission === "granted") return true;
+		}
+		if (typeof fileHandle.requestPermission === "function") {
+			const requestedPermission = await fileHandle.requestPermission(permissionOptions);
+			return requestedPermission === "granted";
+		}
+		return true;
+	};
+
 	// 解析简单的 YAML 格式 Front Matter
 	const parseSimpleYaml = (yamlText: string) => {
 		const data: any = {};
@@ -1294,20 +1568,11 @@ const ArticleEdit: FC<IProps> = props => {
 	};
 
 	const handleImportMarkdown = () => {
-		const input = document.createElement("input");
-		input.type = "file";
-		input.accept = ".md,.markdown,.txt,text/markdown,text/plain";
-		input.style.display = "none";
+		(async () => {
+			const selected = await pickMarkdownFile();
+			if (!selected) return;
 
-		input.onchange = async (e: Event) => {
-			const target = e.target as HTMLInputElement;
-			const file = target.files?.[0];
-
-			if (document.body.contains(input)) {
-				document.body.removeChild(input);
-			}
-
-			if (!file) return;
+			const { file, fileHandle } = selected;
 
 			const fileName = file.name || "";
 			const isMarkdown = /\.(md|markdown|txt)$/i.test(fileName);
@@ -1322,6 +1587,7 @@ const ArticleEdit: FC<IProps> = props => {
 
 			try {
 				const raw = await file.text();
+				const importedSource = buildImportedMarkdownSource(fileName, fileHandle);
 				let markdown = sanitizeYuqueMarkdown(raw);
 
 				// 1. 解析 Front Matter
@@ -1466,6 +1732,15 @@ const ArticleEdit: FC<IProps> = props => {
 
 				// 统一执行状态更新
 				handleChange(finalUpdateData);
+				if (shouldImport === "replace") {
+					importedMarkdownSourceRef.current = importedSource;
+					setImportedMarkdownFileName(fileName);
+					setCanOverwriteMarkdown(Boolean(fileHandle));
+				} else {
+					importedMarkdownSourceRef.current = null;
+					setImportedMarkdownFileName("");
+					setCanOverwriteMarkdown(false);
+				}
 
 				// 更新 AntD 表单 UI
 				const formValues: any = {
@@ -1489,10 +1764,39 @@ const ArticleEdit: FC<IProps> = props => {
 				console.error("导入 Markdown 失败:", error);
 				message.error({ content: "导入失败，请确保文件内容正确", key: loadingKey });
 			}
-		};
+		})();
+	};
 
-		document.body.appendChild(input);
-		input.click();
+	const handleOverwriteImportedMarkdown = async () => {
+		const source = importedMarkdownSourceRef.current;
+		if (!source) {
+			message.warning("请先导入 Markdown 文件");
+			return;
+		}
+		if (!source.fileHandle) {
+			message.warning("当前导入方式无法写回原文件，请在 Chrome/Edge 下重新导入 Markdown");
+			return;
+		}
+
+		try {
+			const hasPermission = await ensureMarkdownWritePermission(source.fileHandle);
+			if (!hasPermission) {
+				message.warning("没有写入原 Markdown 文件的权限");
+				return;
+			}
+
+			const latestContent = applyPendingImageSizeChanges(contentRef.current || content);
+			const currentSourceFile = await source.fileHandle.getFile();
+			const currentFileContent = await currentSourceFile.text();
+			const fileContent = buildMarkdownSourceContent(currentFileContent, latestContent);
+			const writable = await source.fileHandle.createWritable();
+			await writable.write(fileContent);
+			await writable.close();
+			message.success(`已覆盖 ${source.fileName} 的正文，formatter 保持不变`);
+		} catch (error) {
+			console.error("覆盖 Markdown 源文件失败:", error);
+			message.error("覆盖源文件失败，请确认浏览器权限或文件是否仍可写");
+		}
 	};
 
 	const getVideoInsertSnapshot = () => {
@@ -2338,10 +2642,11 @@ const ArticleEdit: FC<IProps> = props => {
 	// 编辑或者新增时提交数据到服务器端
 	const handleSubmit = async () => {
 		// 又 from 中获取数据，需要转换格式的数据
-		const { articleId, cover, content, tagIds, shortTitle } = form;
+		const { articleId, cover, tagIds, shortTitle } = form;
+		const latestContent = contentRef.current || form.content;
 		console.log("handleSubmit 时看看form的值", form);
 		// content 为空的时候，提示用户
-		if (!content) {
+		if (!latestContent) {
 			message.error("请输入文章内容");
 			return;
 		}
@@ -2372,7 +2677,7 @@ const ArticleEdit: FC<IProps> = props => {
 			readType: normalizedReadType,
 			payWay: normalizedPayWay,
 			payAmount: normalizedPayAmount,
-			content: content,
+			content: latestContent,
 			tagIds: tagIds,
 			shortTitle: shortTitle,
 			urlSlug,
@@ -2385,15 +2690,25 @@ const ArticleEdit: FC<IProps> = props => {
 		};
 		console.log("submit 之前的所有值:", newValues);
 
-		const { status: successStatus } = (await saveArticleApi(newValues)) || {};
-		const { code, msg } = successStatus || {};
-		if (code === 0) {
-			message.success("成功");
-			localRemove(draftKey);
-			// 返回文章列表页
-			goBack();
-		} else {
-			message.error(msg || "失败");
+		isSavingArticleRef.current = true;
+		try {
+			const { status: successStatus } = (await saveArticleApi(newValues)) || {};
+			const { code, msg } = successStatus || {};
+			if (code === 0) {
+				message.success("成功");
+				draftBaselineSignatureRef.current = buildDraftSignature(newValues);
+				hasDraftChangesRef.current = false;
+				autoSave.current.cancel();
+				localRemove(draftKey);
+				// 返回文章列表页
+				goBack();
+			} else {
+				isSavingArticleRef.current = false;
+				message.error(msg || "失败");
+			}
+		} catch (error) {
+			isSavingArticleRef.current = false;
+			throw error;
 		}
 	};
 
@@ -2408,7 +2723,7 @@ const ArticleEdit: FC<IProps> = props => {
 
 				// 如果 status 为编辑，就请求数据
 				// 设置文章内容，编辑器使用
-				setContent(result?.content);
+				setServerContent(result?.content);
 
 				// 此时不能直接从 form 中取出来，所以我们从 item 中取出来了。
 				let coverUrl = getCompleteUrl(result?.cover);
@@ -2422,8 +2737,7 @@ const ArticleEdit: FC<IProps> = props => {
 						url: coverUrl
 					}
 				]);
-				// 填充表单
-				formRef.setFieldsValue({
+				const serverFormValues = {
 					title: result?.title,
 					shortTitle: result?.shortTitle,
 					urlSlug: result?.urlSlug,
@@ -2439,23 +2753,42 @@ const ArticleEdit: FC<IProps> = props => {
 						label: item?.tag,
 						value: item?.tag
 					}))
-				});
+				};
+
+				// 填充表单
+				formRef.setFieldsValue(serverFormValues);
 
 				// 保存的时候需要
-				handleChange({
+				const serverFormState = {
 					content: result?.content,
 					articleId: result?.articleId,
+					title: result?.title,
 					shortTitle: result?.shortTitle,
 					urlSlug: result?.urlSlug,
+					summary: result?.summary,
 					status: result?.status,
 					readType: result?.readType ?? defaultInitForm.readType,
 					payWay: result?.payWay || defaultInitForm.payWay,
-					payAmount: result?.payAmount == null ? defaultInitForm.payAmount : Number(result?.payAmount)
+					payAmount: result?.payAmount == null ? defaultInitForm.payAmount : Number(result?.payAmount),
+					categoryId: result?.category?.categoryId,
+					tagIds: result?.tags?.map((item: TagValue) => Number(item?.tagId)).filter(Boolean)
+				};
+				handleChange(serverFormState, false);
+				draftBaselineSignatureRef.current = buildDraftSignature({
+					...serverFormState,
+					...serverFormValues,
+					content: result?.content
 				});
+				hasDraftChangesRef.current = false;
 
 				// 检查草稿
 				const draft = localGet(draftKey);
 				if (draft) {
+					if (isDraftSameAsServerArticle(draft, result || {})) {
+						localRemove(draftKey);
+						return;
+					}
+
 					const draftTime = new Date(draft.timestamp).toLocaleString();
 					Modal.confirm({
 						title: "发现未保存的草稿",
@@ -2463,6 +2796,7 @@ const ArticleEdit: FC<IProps> = props => {
 						okText: "使用草稿",
 						cancelText: "使用服务器版本",
 						onOk: () => {
+							hasDraftChangesRef.current = true;
 							setContent(draft.content);
 							setForm(prev => ({ ...prev, ...draft }));
 							formRef.setFieldsValue(draft);
@@ -2481,6 +2815,7 @@ const ArticleEdit: FC<IProps> = props => {
 							message.success("已加载本地草稿");
 						},
 						onCancel: () => {
+							hasDraftChangesRef.current = false;
 							localRemove(draftKey);
 						}
 					});
@@ -2664,15 +2999,24 @@ const ArticleEdit: FC<IProps> = props => {
 					handleReplaceImgUrl={handleReplaceImgUrl}
 					handleImportWord={handleImportWord}
 					handleImportMarkdown={handleImportMarkdown}
+					handleOverwriteMarkdown={handleOverwriteImportedMarkdown}
 					handleUploadVideo={handleUploadVideo}
+					importedMarkdownFileName={importedMarkdownFileName}
+					canOverwriteMarkdown={canOverwriteMarkdown}
 					handleSave={handleSaveOrUpdate}
 					goBack={goBack}
 				/>
 				<ContentInterWrap>
-					<div className="markdown-body" style={{ position: "relative" }}>
+					<div
+						ref={editorRootRef}
+						className="markdown-body"
+						style={{ position: "relative" }}
+						onMouseDownCapture={handleEditorMouseDownCapture}
+					>
 						<Editor
 							value={content}
 							plugins={editorPlugins}
+							editorConfig={editorConfig}
 							locale={zhHans}
 							uploadImages={files => {
 								return Promise.all(
@@ -2703,6 +3047,16 @@ const ArticleEdit: FC<IProps> = props => {
 								);
 							}}
 							onChange={v => {
+								if (
+									(suppressEditorChangeValueRef.current !== null && v === suppressEditorChangeValueRef.current) ||
+									(!hasDraftChangesRef.current && v === contentRef.current)
+								) {
+									suppressEditorChangeValueRef.current = null;
+									setContent(v);
+									handleChange({ content: v }, false);
+									return;
+								}
+								suppressEditorChangeValueRef.current = null;
 								// 右侧的预览更新
 								setContent(v);
 								handleChange({ content: v });

@@ -39,6 +39,14 @@ const columnRouter: Array<RouteObject> = [
 							title: "登录审计",
 							key: "/author/login-audit/index"
 						}
+					},
+					{
+						path: "/author/operator/index",
+						element: lazyLoad(React.lazy(() => import("@/views/author/operator/index"))),
+						meta: {
+							title: "运营账号",
+							key: "/author/operator/index"
+						}
 					}
 				]
 			}

@@ -102,6 +102,20 @@ export interface UserUnforbidReq {
 	userId: number;
 }
 
+export interface OperatorAccountCreateReq {
+	username: string;
+	password?: string;
+	displayName?: string;
+}
+
+export interface OperatorAccountCreateResult {
+	userId: number;
+	username: string;
+	password: string;
+	displayName: string;
+	role: string;
+}
+
 export interface PageResult<T> {
 	list: T[];
 	pageNum: number;
@@ -132,4 +146,8 @@ export const forbidUserApi = (params: UserForbidReq) => {
 
 export const unforbidUserApi = (params: UserUnforbidReq) => {
 	return http.post<string>(`${PORT1}/user/unforbid`, params);
+};
+
+export const createOperatorAccountApi = (params: OperatorAccountCreateReq) => {
+	return http.post<OperatorAccountCreateResult>(`${PORT1}/user/operator/create`, params);
 };
