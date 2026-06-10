@@ -1,11 +1,23 @@
 /* eslint-disable react/jsx-no-comment-textnodes */
 /* eslint-disable prettier/prettier */
-import { FC, useEffect, useState } from "react";
+import { FC, useEffect, useRef, useState } from "react";
 import React from "react";
 import { connect } from "react-redux";
-import { useLocation } from "react-router-dom";
-import { DeleteOutlined, EditOutlined, EyeOutlined, ImportOutlined, PlusOutlined, SettingOutlined } from "@ant-design/icons";
-import { Button, Card, Drawer, Form, Input, InputNumber, message, Modal, Radio, Space, Tag, Tooltip, Tree } from "antd";
+import { useLocation, useNavigate } from "react-router-dom";
+import {
+	DeleteOutlined,
+	EditOutlined,
+	EyeOutlined,
+	FileTextOutlined,
+	FormOutlined,
+	ImportOutlined,
+	LinkOutlined,
+	PlusOutlined,
+	RobotOutlined,
+	SaveOutlined,
+	SettingOutlined
+} from "@ant-design/icons";
+import { Alert, Button, Card, Drawer, Form, Input, InputNumber, message, Modal, Radio, Space, Tag, Tooltip, Tree } from "antd";
 import type { DataNode } from "antd/es/tree";
 
 import { generateArticleSlugApi, updateArticleSlugApi } from "@/api/modules/article";
@@ -14,10 +26,14 @@ import {
 	deleteGroupApi,
 	getColumnDetailApi,
 	getColumnGroupArticlesApi,
+	getColumnReadmeApi,
+	initColumnReadmeApi,
 	moveColumnArticleOrGroup,
+	saveColumnReadmeApi,
 	updateColumnArticleApi,
 	updateGroupApi
 } from "@/api/modules/column";
+import { UpdateEnum } from "@/enums/common";
 import { MapItem } from "@/typings/common";
 import { baseDomain } from "@/utils/util";
 import TableSelect from "@/views/column/article/components/tableselect/TableSelect";
@@ -50,6 +66,12 @@ interface DataType {
 	groupId: number;
 	readType?: number;
 	previewPercent?: number;
+}
+
+interface ColumnGroupsRouteState {
+	columnId?: number | string;
+	column?: string;
+	urlSlug?: string;
 }
 
 export interface IMoveType {
@@ -119,6 +141,55 @@ const isValidUrlSlug = (value?: string) => {
 	return !!urlSlug && /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(urlSlug) && !/^\d+$/.test(urlSlug);
 };
 
+const EXPANDED_KEYS_STORAGE_PREFIX = "paicoding-admin:column-groups:expanded";
+const COLUMN_GROUPS_CONTEXT_STORAGE_KEY = "paicoding-admin:column-groups:context";
+
+const getExpandedKeysStorageKey = (columnId?: number | string) =>
+	columnId ? `${EXPANDED_KEYS_STORAGE_PREFIX}:${columnId}` : "";
+
+const readStoredExpandedKeys = (storageKey: string): React.Key[] => {
+	if (!storageKey || typeof window === "undefined") return [];
+	try {
+		const parsed = JSON.parse(window.localStorage.getItem(storageKey) || window.sessionStorage.getItem(storageKey) || "[]");
+		return Array.isArray(parsed) ? parsed.filter(key => typeof key === "string" || typeof key === "number") : [];
+	} catch (error) {
+		return [];
+	}
+};
+
+const writeStoredExpandedKeys = (storageKey: string, keys: React.Key[]) => {
+	if (!storageKey || typeof window === "undefined") return;
+	const value = JSON.stringify(keys);
+	window.localStorage.setItem(storageKey, value);
+	window.sessionStorage.setItem(storageKey, value);
+};
+
+const readStoredColumnGroupsContext = (): ColumnGroupsRouteState => {
+	if (typeof window === "undefined") return {};
+	try {
+		const parsed = JSON.parse(
+			window.localStorage.getItem(COLUMN_GROUPS_CONTEXT_STORAGE_KEY) ||
+				window.sessionStorage.getItem(COLUMN_GROUPS_CONTEXT_STORAGE_KEY) ||
+				"{}"
+		);
+		return parsed && typeof parsed === "object" ? parsed : {};
+	} catch (error) {
+		return {};
+	}
+};
+
+const writeStoredColumnGroupsContext = (context: ColumnGroupsRouteState) => {
+	if (!context.columnId || typeof window === "undefined") return;
+	const value = JSON.stringify(context);
+	window.localStorage.setItem(COLUMN_GROUPS_CONTEXT_STORAGE_KEY, value);
+	window.sessionStorage.setItem(COLUMN_GROUPS_CONTEXT_STORAGE_KEY, value);
+};
+
+const normalizeColumnId = (value?: number | string) => {
+	const columnId = Number(value);
+	return Number.isFinite(columnId) && columnId > 0 ? columnId : 0;
+};
+
 const ColumnArticle: FC<IProps> = props => {
 	const [formRef] = Form.useForm();
 	const [slugFormRef] = Form.useForm();
@@ -135,7 +206,12 @@ const ColumnArticle: FC<IProps> = props => {
 	const [isImportDrawerVisible, setIsImportDrawerVisible] = useState<boolean>(false);
 
 	const location = useLocation();
-	const { columnId: columnIdParam, column: columnParam, urlSlug: columnUrlSlug } = location.state || {};
+	const navigate = useNavigate();
+	const routeState = (location.state || {}) as ColumnGroupsRouteState;
+	const storedRouteState = readStoredColumnGroupsContext();
+	const columnGroupsState = routeState.columnId ? routeState : storedRouteState;
+	const columnIdParam = normalizeColumnId(columnGroupsState.columnId);
+	const { column: columnParam, urlSlug: columnUrlSlug } = columnGroupsState;
 	const [currentColumnUrlSlug, setCurrentColumnUrlSlug] = useState<string>(columnUrlSlug || "");
 	const [currentSlugArticle, setCurrentSlugArticle] = useState<DataType>();
 	const [isSlugModalVisible, setIsSlugModalVisible] = useState<boolean>(false);
@@ -144,11 +220,32 @@ const ColumnArticle: FC<IProps> = props => {
 	const [editingUrlSlug, setEditingUrlSlug] = useState<string>("");
 	const [slugGenerating, setSlugGenerating] = useState<boolean>(false);
 	const [slugSaving, setSlugSaving] = useState<boolean>(false);
+	const [isReadmeDrawerVisible, setIsReadmeDrawerVisible] = useState<boolean>(false);
+	const [readmeContent, setReadmeContent] = useState<string>("");
+	const [readmeTitle, setReadmeTitle] = useState<string>("");
+	const [readmeLoading, setReadmeLoading] = useState<boolean>(false);
+	const [readmeSaving, setReadmeSaving] = useState<boolean>(false);
+	const [readmeInitializing, setReadmeInitializing] = useState<boolean>(false);
 
 	const buildArticlePreviewUrl = (article: DataType) => {
 		return article.urlSlug
 			? `${baseDomain}/${article.urlSlug}`
 			: `${baseDomain}/column/${currentColumnUrlSlug || columnIdParam}/${article.sort}`;
+	};
+
+	const buildColumnPreviewUrl = () => `${baseDomain}/column/${currentColumnUrlSlug || columnIdParam}`;
+
+	const openColumnPreview = () => {
+		window.open(buildColumnPreviewUrl(), "_blank", "noreferrer");
+	};
+
+	const handleEditArticle = (article: DataType) => {
+		navigate("/article/edit/index", {
+			state: {
+				articleId: Number(article.articleId),
+				status: UpdateEnum.Edit
+			}
+		});
 	};
 
 	const fetchColumnMeta = async () => {
@@ -162,21 +259,26 @@ const ColumnArticle: FC<IProps> = props => {
 	};
 
 	const fetchTreeData = async () => {
+		if (!columnIdParam) return;
 		const { status, result } = await getColumnGroupArticlesApi(columnIdParam);
 		const { code } = status || {};
 		// @ts-ignore
 		if (code === 0) {
 			const newList = (result as GroupData[]).map((item: GroupData) => ({ ...item, key: item?.groupId }));
 			setGroupTree(newList as unknown as GroupData[]);
+			restoringExpandedKeysRef.current = true;
+			setExpandedKeys(readStoredExpandedKeys(getExpandedKeysStorageKey(columnIdParam)));
+			setAutoExpandParent(true);
 			console.log("获取到的groupTree:", groupTree);
 		}
 	};
 
 	// 数据请求
 	useEffect(() => {
+		writeStoredColumnGroupsContext(columnGroupsState);
 		fetchColumnMeta();
 		fetchTreeData();
-	}, []);
+	}, [columnIdParam]);
 
 	// 递归构建树节点
 	const buildTreeNodes = (groups: GroupData[]): DataNode[] => {
@@ -223,10 +325,21 @@ const ColumnArticle: FC<IProps> = props => {
 										<Button
 											type="text"
 											size="small"
-											icon={<EditOutlined />}
+											icon={<LinkOutlined />}
 											onClick={e => {
 												e.stopPropagation();
 												openSlugModal(article);
+											}}
+										/>
+									</Tooltip>
+									<Tooltip title="编辑文章">
+										<Button
+											type="text"
+											size="small"
+											icon={<FormOutlined />}
+											onClick={e => {
+												e.stopPropagation();
+												handleEditArticle(article);
 											}}
 										/>
 									</Tooltip>
@@ -318,15 +431,36 @@ const ColumnArticle: FC<IProps> = props => {
 
 	const treeData = buildTreeNodes(groupTree);
 
+	const expandedKeysStorageKey = getExpandedKeysStorageKey(columnIdParam);
 	// 控制节点展开/收起的状态
-	const [expandedKeys, setExpandedKeys] = useState<React.Key[]>([]);
+	const [expandedKeys, setExpandedKeys] = useState<React.Key[]>(() => readStoredExpandedKeys(expandedKeysStorageKey));
 	const [autoExpandParent, setAutoExpandParent] = useState(true);
+	const restoringExpandedKeysRef = useRef(false);
+
+	useEffect(() => {
+		restoringExpandedKeysRef.current = true;
+		setExpandedKeys(readStoredExpandedKeys(expandedKeysStorageKey));
+		setAutoExpandParent(true);
+	}, [expandedKeysStorageKey]);
+
+	useEffect(() => {
+		if (restoringExpandedKeysRef.current) {
+			restoringExpandedKeysRef.current = false;
+			return;
+		}
+		writeStoredExpandedKeys(expandedKeysStorageKey, expandedKeys);
+	}, [expandedKeysStorageKey, expandedKeys]);
+
+	const updateExpandedKeys = (keys: React.Key[]) => {
+		setExpandedKeys(keys);
+		writeStoredExpandedKeys(expandedKeysStorageKey, keys);
+	};
 
 	// 处理节点展开/收起
 	const onExpand = (expandedKeysValue: React.Key[]) => {
 		console.log("onExpand", expandedKeysValue);
 		// 如果你不想节点收起，可以删除下面这行
-		setExpandedKeys(expandedKeysValue);
+		updateExpandedKeys(expandedKeysValue);
 		setAutoExpandParent(false);
 	};
 
@@ -338,10 +472,10 @@ const ColumnArticle: FC<IProps> = props => {
 			const key = info.node.key;
 			if (expandedKeys.includes(key)) {
 				// 如果已经展开，则收起
-				setExpandedKeys(expandedKeys.filter(k => k !== key));
+				updateExpandedKeys(expandedKeys.filter(k => k !== key));
 			} else {
 				// 如果已经收起，则展开
-				setExpandedKeys([...expandedKeys, key]);
+				updateExpandedKeys([...expandedKeys, key]);
 			}
 		}
 	};
@@ -550,6 +684,82 @@ const ColumnArticle: FC<IProps> = props => {
 		slugFormRef.setFieldsValue({ urlSlug });
 	};
 
+	const fetchReadme = async () => {
+		if (!columnIdParam) return;
+		setReadmeLoading(true);
+		try {
+			const { status, result } = (await getColumnReadmeApi(columnIdParam)) || {};
+			const { code, msg } = status || {};
+			if (code === 0 && result) {
+				setReadmeContent(result.content || "");
+				setReadmeTitle(result.title || "");
+				if (result.created) {
+					message.info("已生成默认 README，可继续编辑后保存");
+				}
+			} else {
+				message.error(msg || "README 加载失败");
+			}
+		} finally {
+			setReadmeLoading(false);
+		}
+	};
+
+	const openReadmeDrawer = async () => {
+		setIsReadmeDrawerVisible(true);
+		await fetchReadme();
+	};
+
+	const handleInitReadme = () => {
+		Modal.confirm({
+			title: "用第一篇教程初始化 README？",
+			content: "这会覆盖当前编辑框中的内容，但不会直接保存；确认内容后还需要手动点击保存。",
+			okText: "初始化草稿",
+			cancelText: "取消",
+			onOk: async () => {
+				if (!columnIdParam) return;
+				setReadmeInitializing(true);
+				try {
+					const { status, result } = (await initColumnReadmeApi({ columnId: columnIdParam })) || {};
+					const { code, msg } = status || {};
+					if (code === 0 && result) {
+						setReadmeContent(result.content || "");
+						setReadmeTitle(result.title || "");
+						message.success("README 草稿已生成，请检查后保存");
+					} else {
+						message.error(msg || "README 初始化失败");
+					}
+				} finally {
+					setReadmeInitializing(false);
+				}
+			}
+		});
+	};
+
+	const handleSaveReadme = async (previewAfterSave = false) => {
+		if (!columnIdParam) return;
+		setReadmeSaving(true);
+		try {
+			const { status, result } =
+				(await saveColumnReadmeApi({
+					columnId: columnIdParam,
+					content: readmeContent
+				})) || {};
+			const { code, msg } = status || {};
+			if (code === 0 && result) {
+				setReadmeContent(result.content || "");
+				setReadmeTitle(result.title || "");
+				message.success("README 已保存");
+				if (previewAfterSave) {
+					openColumnPreview();
+				}
+			} else {
+				message.error(msg || "README 保存失败");
+			}
+		} finally {
+			setReadmeSaving(false);
+		}
+	};
+
 	// 专栏内容进行拖拽，支持文章 拖拽； 分组拖拽
 	const handleDrop = async (info: any) => {
 		const { dragNode, node, dropToGap } = info;
@@ -718,15 +928,21 @@ const ColumnArticle: FC<IProps> = props => {
 			<Card
 				title={"《" + columnParam + "》"}
 				extra={
-					<Button
-						onClick={() => {
-							// 显示添加分组弹窗
-							setCurrentGroup(undefined);
-							setIsAddModalVisible(true);
-						}}
-					>
-						+
-					</Button>
+					<Space>
+						<Button icon={<FileTextOutlined />} onClick={openReadmeDrawer}>
+							编辑 README
+						</Button>
+						<Button
+							icon={<PlusOutlined />}
+							onClick={() => {
+								// 显示添加分组弹窗
+								setCurrentGroup(undefined);
+								setIsAddModalVisible(true);
+							}}
+						>
+							新增分组
+						</Button>
+					</Space>
 				}
 			>
 				<Tree
@@ -871,6 +1087,48 @@ const ColumnArticle: FC<IProps> = props => {
 				open={isImportDrawerVisible}
 			>
 				{reviseDrawerContent}
+			</Drawer>
+			<Drawer
+				title="编辑教程介绍页 README"
+				width={900}
+				placement="right"
+				extra={
+					<Space>
+						<Button icon={<EyeOutlined />} onClick={openColumnPreview}>
+							预览教程页
+						</Button>
+						<Button icon={<RobotOutlined />} loading={readmeInitializing} onClick={handleInitReadme}>
+							从第一篇初始化
+						</Button>
+						<Button icon={<SaveOutlined />} loading={readmeSaving} onClick={() => handleSaveReadme()}>
+							保存
+						</Button>
+						<Button type="primary" icon={<SaveOutlined />} loading={readmeSaving} onClick={() => handleSaveReadme(true)}>
+							保存并预览
+						</Button>
+					</Space>
+				}
+				onClose={() => setIsReadmeDrawerVisible(false)}
+				open={isReadmeDrawerVisible}
+			>
+				<div className="readme-editor">
+					<Alert
+						type="info"
+						showIcon
+						message={`README 会作为 ${buildColumnPreviewUrl()} 这个教程介绍页的主体内容展示，支持 Markdown、图片和视频。初始化只生成可编辑草稿，不会自动保存。`}
+					/>
+					<div className="readme-editor-meta">
+						<span>{readmeTitle || "README"}</span>
+						<span>{readmeContent.length} 字符</span>
+					</div>
+					<Input.TextArea
+						value={readmeContent}
+						disabled={readmeLoading}
+						autoSize={{ minRows: 24, maxRows: 36 }}
+						placeholder="请输入教程 README Markdown 内容"
+						onChange={e => setReadmeContent(e.target.value)}
+					/>
+				</div>
 			</Drawer>
 		</div>
 	);

@@ -45,7 +45,6 @@ interface DataType {
 	columnId: number;
 	column: string; // 教程名
 	urlSlug: string;
-	readmeArticleId: number;
 	state: number;
 	freeEndTime: number;
 	freeStartTime: number;
@@ -60,7 +59,6 @@ export interface IFormType {
 	columnId: number; // 为0时，是保存，非0是更新
 	column: string; // 教程名
 	urlSlug: string; // 教程 URL 标识
-	readmeArticleId: number; // 教程说明页文章ID
 	author: number; // 作者ID
 	introduction: string; // 简介
 	cover: string; // 封面 URL
@@ -78,7 +76,6 @@ const defaultInitForm: IFormType = {
 	columnId: -1,
 	column: "",
 	urlSlug: "",
-	readmeArticleId: 0,
 	author: -1,
 	introduction: "",
 	cover: "",
@@ -124,7 +121,6 @@ const Column: FC<IProps> = props => {
 		columnId,
 		column,
 		urlSlug,
-		readmeArticleId,
 		introduction,
 		cover,
 		authorAvatar,
@@ -140,7 +136,6 @@ const Column: FC<IProps> = props => {
 	const detailInfo = [
 		{ label: "教程名", title: column },
 		{ label: "专栏URL", title: urlSlug },
-		{ label: "说明页文章", title: readmeArticleId > 0 ? readmeArticleId : "-" },
 		{ label: "简介", title: introduction },
 		{ label: "连载数量", title: nums },
 		{ label: "类型", title: ColumnType[type] },
@@ -301,9 +296,9 @@ const Column: FC<IProps> = props => {
 		});
 	};
 
-	const handleManage = (columnId: number, column: string, readmeArticleId: number, urlSlug: string) => {
+	const handleManage = (columnId: number, column: string, urlSlug: string) => {
 		// 导航到文章排序页面
-		navigate("/column/setting/index/groups", { state: { columnId, column, readmeArticleId, urlSlug } });
+		navigate("/column/setting/index/groups", { state: { columnId, column, urlSlug } });
 	};
 
 	// 编辑或者新增时提交数据到服务器端
@@ -382,10 +377,7 @@ const Column: FC<IProps> = props => {
 			dataIndex: "column",
 			key: "column",
 			render(value, item) {
-				const href =
-					item?.readmeArticleId > 0 && item?.urlSlug
-						? `${baseDomain}/${item.urlSlug}/readme`
-						: `${baseDomain}/column/${item?.urlSlug || item?.columnId}`;
+				const href = `${baseDomain}/column/${item?.urlSlug || item?.columnId}`;
 				return (
 					<a href={href} className="cell-text" target="_blank" rel="noreferrer">
 						{value}
@@ -440,7 +432,7 @@ const Column: FC<IProps> = props => {
 			key: "key",
 			width: 200,
 			render: (_, item) => {
-				const { columnId, column, readmeArticleId, urlSlug, type, state, cover, freeStartTime, freeEndTime } = item;
+				const { columnId, column, urlSlug, type, state, cover, freeStartTime, freeEndTime } = item;
 
 				return (
 					<div className="operation-btn">
@@ -463,7 +455,7 @@ const Column: FC<IProps> = props => {
 								icon={<SwapOutlined />}
 								style={{ marginRight: "10px" }}
 								onClick={() => {
-									handleManage(columnId, column, readmeArticleId, urlSlug);
+									handleManage(columnId, column, urlSlug);
 								}}
 							></Button>
 						</Tooltip>
@@ -526,7 +518,7 @@ const Column: FC<IProps> = props => {
 			<Form.Item
 				label="专栏 URL"
 				name="urlSlug"
-				tooltip="保存后可通过 https://xxx/{专栏URL}/readme 或 /column/{专栏URL} 访问"
+				tooltip="保存后可通过 https://xxx/column/{专栏URL} 访问"
 				rules={[
 					{
 						validator: (_, value) =>

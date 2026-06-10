@@ -20,6 +20,13 @@ export interface IColumnArticleForm {
 	previewPercent?: number;
 }
 
+export interface ColumnReadmeDTO {
+	columnId: number;
+	title: string;
+	content: string;
+	created?: boolean;
+}
+
 // 获取列表
 export const getColumnListApi = (data: { pageNumber: number; pageSize: number }) => {
 	return http.post(`${PORT1}/column/list`, data);
@@ -80,9 +87,19 @@ export const updateColumnArticleApi = (form: IColumnArticleForm) => {
 	return http.post<Login.ResAuthButtons>(`${PORT1}/column/saveColumnArticle`, form);
 };
 
-// 设置教程说明页文章
-export const setColumnReadmeArticleApi = (data: { columnId: number; articleId: number }) => {
-	return http.post<Login.ResAuthButtons>(`${PORT1}/column/setReadmeArticle`, data);
+// 获取教程介绍页 README
+export const getColumnReadmeApi = (columnId: number) => {
+	return http.get<ColumnReadmeDTO>(`${PORT1}/column/readme`, { columnId });
+};
+
+// 保存教程 README
+export const saveColumnReadmeApi = (data: { columnId: number; content: string }) => {
+	return http.post<ColumnReadmeDTO>(`${PORT1}/column/readme/save`, data);
+};
+
+// 根据第一篇教程初始化 README 草稿
+export const initColumnReadmeApi = (data: { columnId: number }) => {
+	return http.post<ColumnReadmeDTO>(`${PORT1}/column/readme/init`, data, { timeout: 60000 });
 };
 
 // 删除教程操作
